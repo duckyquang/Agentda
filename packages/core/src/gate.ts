@@ -8,6 +8,13 @@ export type DecisionSource = 'auto-class' | 'auto-mode' | 'human-tap' | 'human-t
 
 export interface BotPolicy {
   mode: Mode
+  // The tools this bot may use AT ALL (FR-11 availability). Enforcement lives
+  // here rather than in CLI flags because flags can't express it: `--tools ""`
+  // disables MCP servers too (verified on 2.1.206), and a name blocklist fails
+  // open on every CLI release. Anything not matched is denied outright — never
+  // escalated to the human, since a bot reaching for a tool it was never
+  // granted is a bug or an injection, not a decision worth a human's time.
+  grants: string[]
   // Tool-name patterns that run without asking because they are genuinely
   // read-only (FR-19). Everything not matched here is gated by default —
   // unknown tools are gated, never auto-allowed.
@@ -20,11 +27,13 @@ export interface BotPolicy {
 
 export type GateOutcome =
   | { kind: 'allow'; source: Extract<DecisionSource, 'auto-class' | 'auto-mode'>; reason: string }
+  | { kind: 'deny'; reason: string } // not granted to this bot at all
   | { kind: 'approve'; reason: string } // must block on a human; queue + bridge take over
 
 export function defaultPolicy(mode: Mode = 'ask'): BotPolicy {
   return {
     mode,
+    grants: [],
     autoApprove: [],
     // Bash/shell and anything that reads as a shell tool: block even in Auto.
     alwaysAsk: ['Bash', 'shell', 'mcp__*__shell*', 'mcp__*__exec*'],
@@ -43,8 +52,20 @@ export function matches(pattern: string, name: string): boolean {
 
 const anyMatch = (patterns: string[], name: string) => patterns.some((p) => matches(p, name))
 
+// Discovery machinery, not actions. MCP tools are deferred: the model finds them
+// through ToolSearch, so gating it makes every attached MCP server invisible and
+// the bot insists its tools do not exist. It reads names and descriptions of
+// tools we already decided to attach — no side effects, nothing to approve.
+const DISCOVERY_TOOLS = ['ToolSearch']
+
 // paused forces Ask regardless of the bot's stored mode (the global /pause switch).
 export function decide(tool: string, policy: BotPolicy, paused = false): GateOutcome {
+  if (DISCOVERY_TOOLS.includes(tool)) {
+    return { kind: 'allow', source: 'auto-class', reason: 'tool discovery, no side effects' }
+  }
+  if (!anyMatch(policy.grants, tool)) {
+    return { kind: 'deny', reason: `${tool} is not granted to this bot` }
+  }
   if (anyMatch(policy.autoApprove, tool)) {
     return { kind: 'allow', source: 'auto-class', reason: 'read-only tool, auto-approved' }
   }

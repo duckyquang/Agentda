@@ -4,7 +4,10 @@ import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { ApprovalQueue, type ApprovalRequest } from '../src/approvals'
 import { openDb } from '../src/db'
-import { defaultPolicy } from '../src/gate'
+import { defaultPolicy, type Mode } from '../src/gate'
+
+// Grant everything: these tests are about approval, not availability.
+const grantAll = (mode: Mode = 'ask') => ({ ...defaultPolicy(mode), grants: ['*'] })
 
 const dir = mkdtempSync(join(tmpdir(), 'agentda-approvals-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -21,7 +24,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
     let asked: ApprovalRequest | undefined
     const { db, q } = fresh({ ask: (r) => void (asked = r) })
 
-    const pending = q.request({ bot: 'b', chat: 'c', tool: 'mcp__mail__send', input: { to: 'x@y.z' } }, defaultPolicy())
+    const pending = q.request({ bot: 'b', chat: 'c', tool: 'mcp__mail__send', input: { to: 'x@y.z' } }, grantAll())
     await new Promise((r) => setImmediate(r))
 
     expect(asked).toBeDefined() // it really asked
@@ -37,7 +40,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
   it('deny is honored and logged', async () => {
     let asked: ApprovalRequest | undefined
     const { db, q } = fresh({ ask: (r) => void (asked = r) })
-    const pending = q.request({ bot: 'b', tool: 'Write', input: {} }, defaultPolicy())
+    const pending = q.request({ bot: 'b', tool: 'Write', input: {} }, grantAll())
     await new Promise((r) => setImmediate(r))
     q.settle(asked!.id, { decision: 'deny', source: 'human-tap', reason: 'nope' })
     await expect(pending).resolves.toMatchObject({ decision: 'deny' })
@@ -46,7 +49,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
 
   it('times out to DENY, never to allow (FR-22)', async () => {
     const { db, q } = fresh({ timeoutMs: 40 })
-    const res = await q.request({ bot: 'b', tool: 'mcp__mail__send', input: {} }, defaultPolicy())
+    const res = await q.request({ bot: 'b', tool: 'mcp__mail__send', input: {} }, grantAll())
     expect(res).toMatchObject({ decision: 'deny', source: 'timeout' })
     expect(rows(db)[0]).toMatchObject({ decision: 'deny', source: 'timeout', mode: 'ask' })
     expect(q.pendingCount()).toBe(0)
@@ -54,7 +57,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
 
   it('auto mode runs gated tools unattended but ALWAYS-ASK still blocks and times out to deny', async () => {
     const { db, q } = fresh({ timeoutMs: 40 })
-    const auto = defaultPolicy('auto')
+    const auto = grantAll('auto')
 
     await expect(q.request({ bot: 'b', tool: 'mcp__mail__send', input: {} }, auto)).resolves.toMatchObject({
       decision: 'allow',
@@ -75,7 +78,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
 
   it('every decision lands in the audit log — auto-approved reads included (NFR-3)', async () => {
     const { db, q } = fresh()
-    await q.request({ bot: 'b', tool: 'mcp__fs__read_file', input: {} }, { ...defaultPolicy(), autoApprove: ['mcp__fs__read_*'] })
+    await q.request({ bot: 'b', tool: 'mcp__fs__read_file', input: {} }, { ...grantAll(), autoApprove: ['mcp__fs__read_*'] })
     expect(rows(db)).toMatchObject([{ decision: 'allow', source: 'auto-class' }])
   })
 
@@ -83,7 +86,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
     const path = join(dir, 'restart.db')
     const db1 = openDb(path)
     const q1 = new ApprovalQueue(db1, { timeoutMs: 60_000 })
-    void q1.request({ bot: 'b', tool: 'Write', input: {} }, defaultPolicy())
+    void q1.request({ bot: 'b', tool: 'Write', input: {} }, grantAll())
     await new Promise((r) => setImmediate(r))
     expect(db1.prepare('SELECT count(*) c FROM pending_approvals').get()).toMatchObject({ c: 1 })
     db1.close()
@@ -96,7 +99,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
 
   it('shutdown denies everything still open instead of hanging', async () => {
     const { q } = fresh({ timeoutMs: 60_000 })
-    const pending = q.request({ bot: 'b', tool: 'Write', input: {} }, defaultPolicy())
+    const pending = q.request({ bot: 'b', tool: 'Write', input: {} }, grantAll())
     await new Promise((r) => setImmediate(r))
     q.denyAll()
     await expect(pending).resolves.toMatchObject({ decision: 'deny' })
@@ -105,7 +108,7 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
   it('a stale settle() cannot resurrect or double-resolve a decision', async () => {
     let asked: ApprovalRequest | undefined
     const { q } = fresh({ ask: (r) => void (asked = r) })
-    const pending = q.request({ bot: 'b', tool: 'Write', input: {} }, defaultPolicy())
+    const pending = q.request({ bot: 'b', tool: 'Write', input: {} }, grantAll())
     await new Promise((r) => setImmediate(r))
     expect(q.settle(asked!.id, { decision: 'deny', source: 'human-tap' })).toBe(true)
     expect(q.settle(asked!.id, { decision: 'allow', source: 'human-tap' })).toBe(false) // too late

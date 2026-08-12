@@ -67,6 +67,20 @@ export function mapLine(line: unknown): AgentEvent[] {
 // doctor canary flags anything outside it (NFR-6).
 export const TESTED_CLAUDE_PREFIX = '2.1.'
 
+// Built-in tool names in 2.1.206, used only to quiet the model when MCP servers
+// force us off `--tools ""`. This list going stale is harmless: the gate denies
+// ungranted tools regardless, so a new built-in is blocked, not allowed.
+//
+// ToolSearch is deliberately NOT here: MCP tools are deferred and the model
+// discovers them through it, so disabling it makes attached MCP servers
+// unreachable (cost me an afternoon — the tools loaded fine and the model
+// insisted they did not exist).
+const BUILTIN_TOOLS = [
+  'Agent', 'Bash', 'BashOutput', 'Edit', 'Glob', 'Grep', 'KillShell', 'Monitor', 'NotebookEdit',
+  'Read', 'SendMessage', 'Skill', 'SlashCommand', 'Task', 'TaskStop', 'TodoWrite',
+  'WebFetch', 'WebSearch', 'Write',
+]
+
 // One source of truth for the spawn args — the doctor canary spawns with exactly
 // what the adapter spawns with, so the isolation it verifies is the isolation
 // that ships.
@@ -102,12 +116,22 @@ export function claudeArgs(opts: TurnOptions = {}): string[] {
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--tools',
-    ...(opts.tools?.length ? opts.tools : ['']),
     '--strict-mcp-config',
     '--setting-sources',
     '',
   ]
+
+  // Built-in tool availability. `--tools ""` is the clean fail-closed switch,
+  // but on 2.1.206 it also suppresses MCP tools (verified), so a bot with MCP
+  // servers cannot use it. In that case the PreToolUse gate is the enforcement
+  // point — it denies anything outside the bot's grants — and --disallowedTools
+  // is only noise reduction so the model stops reaching for tools it can't have.
+  if (opts.mcpConfig) {
+    if (!opts.tools?.length) args.push('--disallowedTools', ...BUILTIN_TOOLS)
+    else args.push('--tools', ...opts.tools)
+  } else {
+    args.push('--tools', ...(opts.tools?.length ? opts.tools : ['']))
+  }
   if (opts.mcpConfig) args.push('--mcp-config', opts.mcpConfig)
   if (opts.settings) args.push('--settings', opts.settings)
   if (opts.appendSystemPromptFile) args.push('--append-system-prompt-file', opts.appendSystemPromptFile)

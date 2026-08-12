@@ -17,10 +17,23 @@ describe('matches', () => {
 })
 
 describe('decide', () => {
-  const policy = (over: Partial<ReturnType<typeof defaultPolicy>> = {}) => ({ ...defaultPolicy(), ...over })
+  // Grants are what a bot may touch at all; most tests grant everything so they
+  // can exercise the approval logic itself.
+  const policy = (over: Partial<ReturnType<typeof defaultPolicy>> = {}) => ({ ...defaultPolicy(), grants: ['*'], ...over })
 
   it('gates unknown tools by default — fail closed', () => {
     expect(decide('SomeNewToolFromAFutureCLI', policy()).kind).toBe('approve')
+  })
+
+  it('denies outright anything the bot was never granted, without bothering the human', () => {
+    const p = policy({ grants: ['mcp__agentda__*'] })
+    expect(decide('Bash', p)).toMatchObject({ kind: 'deny' })
+    expect(decide('mcp__mail__send', p)).toMatchObject({ kind: 'deny' })
+    expect(decide('mcp__agentda__memory_write', p).kind).toBe('approve') // granted, still gated
+  })
+
+  it('a bot with no grants can do nothing at all', () => {
+    expect(decide('Read', { mode: 'auto', grants: [], autoApprove: ['Read'], alwaysAsk: [] })).toMatchObject({ kind: 'deny' })
   })
 
   it('auto-approves only what the policy names read-only', () => {

@@ -68,6 +68,13 @@ export class ApprovalQueue {
       return res
     }
 
+    if (outcome.kind === 'deny') {
+      // Ungranted tool: refused outright and logged, never put to the human.
+      const res: Resolution = { decision: 'deny', source: 'auto-class', reason: outcome.reason }
+      this.log({ ...args, chat }, mode, res)
+      return res
+    }
+
     const req: ApprovalRequest = {
       id: randomUUID(),
       bot: args.bot,

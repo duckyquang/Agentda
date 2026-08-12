@@ -34,6 +34,39 @@ export function openDb(path: string): Database.Database {
       reason TEXT
     );
 
+    -- Our own turn counts, for the soft budgets. Local estimates only: no vendor
+    -- publishes real plan metering, so we never claim these are that.
+    CREATE TABLE IF NOT EXISTS turn_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bot TEXT NOT NULL,
+      ts TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS turn_ledger_bot_ts ON turn_ledger (bot, ts);
+
+    -- At-most-once scheduling across sleep and crash (NFR-4): a routine
+    -- occurrence is claimed here before it runs, so a restart cannot re-fire it.
+    CREATE TABLE IF NOT EXISTS routine_runs (
+      bot TEXT NOT NULL,
+      routine TEXT NOT NULL,
+      occurrence TEXT NOT NULL,
+      ran_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL,
+      detail TEXT,
+      PRIMARY KEY (bot, routine, occurrence)
+    );
+
+    -- Multi-bot handoffs: visible work transfer with a hard turn cap so two
+    -- models cannot ping-pong through the user's quota (FR-35..37).
+    CREATE TABLE IF NOT EXISTS handoffs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat TEXT NOT NULL,
+      task TEXT NOT NULL,
+      from_bot TEXT NOT NULL,
+      to_bot TEXT NOT NULL,
+      note TEXT,
+      ts TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Approvals outlive the process: a request parked here is reloaded and
     -- re-denied on restart rather than orphaning a blocked provider turn.
     CREATE TABLE IF NOT EXISTS pending_approvals (

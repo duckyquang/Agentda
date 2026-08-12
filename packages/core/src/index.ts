@@ -3,6 +3,19 @@ export { openDb, type Db } from './db'
 export { type BotPolicy, type DecisionSource, decide, defaultPolicy, type GateOutcome, matches, type Mode } from './gate'
 export { type ApprovalRequest, ApprovalQueue, type Resolution } from './approvals'
 export { HookServer } from './hook-server'
+export { type BudgetVerdict, checkBudget, type Guardrails, recordTurn } from './budget'
+export {
+  loadPersona,
+  loadPersonas,
+  memoryDir,
+  type Persona,
+  readMemory,
+  setPersonaMode,
+  writeMemory,
+} from './persona'
+export { TurnRunner, type TurnResult } from './runner'
+export { Scheduler } from './scheduler'
+export { Owners } from './owners'
 
 // Normalized events every provider adapter emits. Kept exactly as big as the
 // Claude adapter needs (PLAN Phase 0); grows only when a second adapter demands it.

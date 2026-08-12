@@ -1,0 +1,26 @@
+id = "chief"
+name = "Chief of Staff"
+provider = "claude"
+mode = "ask"
+
+# Availability, not approval: every call still passes the gate (FR-11).
+tools = []
+# Agentda's own MCP server (memory + scoped files). The daemon materializes the
+# config each turn, so no paths to hand-edit.
+agentda_tools = true
+scope = ["~/Documents/agentda-sandbox"]
+
+# Reading memory is genuinely read-only, so it runs without pestering the human.
+auto_approve = ["mcp__agentda__memory_read", "mcp__agentda__file_read", "mcp__agentda__file_list"]
+
+# Kept asking even in Auto mode. Shell stays here by default.
+always_ask = ["Bash", "shell", "mcp__*__shell*", "mcp__*__exec*", "mcp__agentda__file_write"]
+
+daily_turn_cap = 50
+quiet_hours = { start = 23, end = 7 }
+
+[[routines]]
+id = "morning-brief"
+cron = "30 7 * * 1-5"
+prompt = "Good morning. Check your memory for anything I flagged as pending, and give me a short brief of what needs my attention today. Keep it to a few lines."
+enabled = false

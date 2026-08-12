@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApprovalQueue } from './approvals'
@@ -78,6 +78,7 @@ export class HookServer {
   // human, silently turning "waiting for you" into a failure.
   writeSettings(dir?: string): string {
     const d = dir ?? mkdtempSync(join(tmpdir(), 'agentda-hook-'))
+    mkdirSync(d, { recursive: true }) // callers pass a path that may not exist yet
     const shim = join(d, 'gate.sh')
     const timeoutSec = Math.ceil(this.queue.timeoutMs / 1000) + 30
     writeFileSync(

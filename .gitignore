@@ -3,3 +3,7 @@ dist/
 *.tsbuildinfo
 *.log
 .DS_Store
+
+# Local secrets: Telegram token, mailbox credentials. Never commit.
+.env*.local
+.env

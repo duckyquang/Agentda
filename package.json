@@ -11,8 +11,8 @@
     "canary": "tsx apps/cli/src/canary.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "daemon": "tsx apps/daemon/src/index.ts",
-    "test:live": "AGENTDA_LIVE=1 vitest run"
+    "daemon": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs apps/daemon/src/index.ts",
+    "test:live": "node --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

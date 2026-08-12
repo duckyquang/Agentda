@@ -16,6 +16,7 @@ export {
 export { TurnRunner, type TurnResult } from './runner'
 export { Scheduler } from './scheduler'
 export { Owners } from './owners'
+export { DEFAULT_HANDOFF_CAP, type Handoff, handoffCount, recordHandoff, tryHandoff } from './handoff'
 
 // Normalized events every provider adapter emits. Kept exactly as big as the
 // Claude adapter needs (PLAN Phase 0); grows only when a second adapter demands it.

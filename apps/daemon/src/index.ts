@@ -11,6 +11,7 @@ import {
   type Persona,
   Scheduler,
   SessionStore,
+  tryHandoff,
   setPersonaMode,
   TurnRunner,
 } from '@agentda/core'
@@ -109,15 +110,7 @@ const bridge = createBridge({
   personas: () => personas,
   logDropped: (userId, why) => console.warn(`dropped update from ${userId}: ${why}`),
   onMessage: async (persona, chat, text, reply) => {
-    chatFor.set(persona.id, chat)
-    const res = await runner.run(persona, chat, stripAddress(text, persona), {
-      onEvent: (e) => {
-        if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
-      },
-    })
-    if (res.skipped) return reply(`(skipped: ${res.skipped})`)
-    if (res.error) return reply(`${res.error.kind}: ${res.error.hint ?? res.error.message}`)
-    await reply(res.text || '(no reply)')
+    await runTurn(persona, chat, stripAddress(text, persona), reply, text)
   },
   onCommand: async (cmd, args, chat, reply) => {
     if (cmd === 'mode') {
@@ -183,6 +176,45 @@ function lastKnownChat(): string | undefined {
   return chatFor.values().next().value
 }
 
+// One turn, plus the handoff chain it may start. A bot ends its turn with
+// `@other: do X` to pass work along; every hop is visible in the thread and
+// counted against the per-task cap, so two bots cannot ping-pong forever.
+async function runTurn(
+  persona: Persona,
+  chat: string,
+  input: string,
+  reply: (s: string) => Promise<void>,
+  task: string,
+  depth = 0,
+): Promise<void> {
+  chatFor.set(persona.id, chat)
+  const res = await runner.run(persona, chat, input, {
+    onEvent: (e) => {
+      if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
+    },
+  })
+  if (res.skipped) return reply(`(${persona.id} skipped: ${res.skipped})`)
+  if (res.error) return reply(`${persona.id} — ${res.error.kind}: ${res.error.hint ?? res.error.message}`)
+  await reply(res.text || '(no reply)')
+  if (res.memoryNotice) await reply(res.memoryNotice)
+
+  const next = parseHandoff(res.text)
+  if (!next) return
+  const target = personas.find((p) => p.id.toLowerCase() === next.to.toLowerCase())
+  if (!target || target.id === persona.id) return
+  const gate = tryHandoff(db, { chat, task, from: persona.id, to: target.id, note: next.note })
+  if (!gate.ok) return reply(`↪︎ ${gate.reason}`)
+  await reply(`↪︎ ${persona.id} → ${target.id}`)
+  await runTurn(target, chat, `${persona.id} handed this to you: ${next.note}`, reply, task, depth + 1)
+}
+
+// A handoff is the last line of a reply: "@scout: check these three names".
+function parseHandoff(text: string): { to: string; note: string } | undefined {
+  const line = text.trim().split('\n').filter(Boolean).pop() ?? ''
+  const m = /^@([\w-]+)\s*[::]\s*(.+)$/.exec(line.trim())
+  return m ? { to: m[1], note: m[2] } : undefined
+}
+
 function stripAddress(text: string, p: Persona): string {
   return text.replace(new RegExp(`(^|\\s)@?${p.id}\\b[:,]?`, 'i'), ' ').trim() || text
 }
@@ -193,7 +225,22 @@ if (owners.count('telegram') === 0) {
 }
 
 scheduler.start()
-await bridge.bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`bridge live as @${me.username}`) })
+try {
+  await bridge.bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`bridge live as @${me.username}`) })
+} catch (err) {
+  const e = err as { error_code?: number; message: string }
+  console.error(
+    e.error_code === 401
+      ? 'Telegram rejected the token. Check TELEGRAM_BOT_TOKEN against what @BotFather gave you.'
+      : e.error_code === 409
+        ? 'Another process is already polling this bot token — stop the other daemon first.'
+        : `Telegram bridge failed: ${e.message}`,
+  )
+  queue.denyAll('daemon failed to start')
+  await hook.close()
+  db.close()
+  process.exit(1)
+}
 
 const shutdown = async () => {
   console.log('\nshutting down…')

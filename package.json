@@ -10,7 +10,9 @@
     "chat": "tsx apps/cli/src/chat.ts",
     "canary": "tsx apps/cli/src/canary.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "daemon": "tsx apps/daemon/src/index.ts",
+    "test:live": "AGENTDA_LIVE=1 vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

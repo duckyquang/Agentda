@@ -15,7 +15,15 @@ export interface TurnResult {
   sessionId?: string
   skipped?: string // set when a guardrail refused the turn
   error?: { kind: string; message: string; hint?: string }
+  // Set when the run both read untrusted content and wrote memory (FR-26).
+  // Memory is how a prompt injection survives past the session that carried it,
+  // so those writes are surfaced to the human instead of happening quietly.
+  memoryNotice?: string
 }
+
+// Tools whose output is attacker-controllable: anything the bot reads from the
+// outside world. A run that touches one of these is "tainted" for FR-26.
+const UNTRUSTED_READ = /mail|imap|web|browser_read|browser_navigate|fetch|rss|feed/i
 
 // Runs one bot turn: budget check, context assembly, provider call through the
 // gate. Everything a surface (Telegram, CLI, scheduler) needs, in one place, so
@@ -92,7 +100,17 @@ export class TurnRunner {
       return { text: text.join(''), toolCalls, error: { kind: e.kind ?? 'other', message: e.message, hint: e.hint } }
     }
 
-    return { text: text.join(''), toolCalls, sessionId }
+    const tainted = toolCalls.some((t) => UNTRUSTED_READ.test(t))
+    const memoryWrites = toolCalls.filter((t) => /memory_write/.test(t))
+    return {
+      text: text.join(''),
+      toolCalls,
+      sessionId,
+      memoryNotice:
+        tainted && memoryWrites.length
+          ? `⚠︎ ${persona.id} updated its memory during a run that read outside content. Memory shapes every future run, so check it: ${join(persona.dir, 'memory')}`
+          : undefined,
+    }
   }
 
   // Built fresh each turn so bot dir, scope, and server path are always right —

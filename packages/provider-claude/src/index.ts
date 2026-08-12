@@ -82,7 +82,18 @@ export const TESTED_CLAUDE_PREFIX = '2.1.'
 // whose hooks otherwise run arbitrary shell inside every turn, and whose
 // permission allows let a bare turn edit files mid-chat (observed live).
 // Phase 1 reopens tools deliberately via --mcp-config + the FR-11 gate.
-export function claudeArgs(resume?: string): string[] {
+export interface TurnOptions {
+  resume?: string
+  // Built-in tools this bot may use at all. Availability only — approval is the
+  // gate's job (FR-11), so these are NOT passed to --allowedTools: every call
+  // still routes through the PreToolUse hook.
+  tools?: string[]
+  mcpConfig?: string // path to an MCP config; --strict-mcp-config keeps it exact
+  settings?: string // path to the gate hook's settings file
+  appendSystemPromptFile?: string
+}
+
+export function claudeArgs(opts: TurnOptions = {}): string[] {
   const args = [
     '-p',
     '--input-format',
@@ -92,12 +103,15 @@ export function claudeArgs(resume?: string): string[] {
     '--verbose',
     '--include-partial-messages',
     '--tools',
-    '',
+    ...(opts.tools?.length ? opts.tools : ['']),
     '--strict-mcp-config',
     '--setting-sources',
     '',
   ]
-  if (resume) args.push('--resume', resume)
+  if (opts.mcpConfig) args.push('--mcp-config', opts.mcpConfig)
+  if (opts.settings) args.push('--settings', opts.settings)
+  if (opts.appendSystemPromptFile) args.push('--append-system-prompt-file', opts.appendSystemPromptFile)
+  if (opts.resume) args.push('--resume', opts.resume)
   return args
 }
 
@@ -108,7 +122,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
   constructor(private bin = 'claude') {}
 
-  async *startTurn(input: string, opts: { resume?: string } = {}): AsyncGenerator<AgentEvent> {
+  async *startTurn(input: string, opts: TurnOptions = {}): AsyncGenerator<AgentEvent> {
     // FR-8: a stray key silently outranks subscription login and bills the API org.
     if (!this.warnedAboutKey && process.env.ANTHROPIC_API_KEY) {
       this.warnedAboutKey = true
@@ -119,7 +133,12 @@ export class ClaudeAdapter implements ProviderAdapter {
       }
     }
 
-    const child = spawn(this.bin, claudeArgs(opts.resume), { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(this.bin, claudeArgs(opts), {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // The hook must outlive the CLI's own MCP/tool timeouts while a human
+      // thinks; this knob is what keeps a 30-minute approval alive.
+      env: { ...process.env, MCP_TOOL_TIMEOUT: process.env.MCP_TOOL_TIMEOUT ?? '3600000' },
+    })
 
     let spawnErr: AdapterError | undefined
     child.on('error', (err: NodeJS.ErrnoException) => {

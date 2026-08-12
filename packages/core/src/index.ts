@@ -1,4 +1,8 @@
 export { SessionStore } from './store'
+export { openDb, type Db } from './db'
+export { type BotPolicy, type DecisionSource, decide, defaultPolicy, type GateOutcome, matches, type Mode } from './gate'
+export { type ApprovalRequest, ApprovalQueue, type Resolution } from './approvals'
+export { HookServer } from './hook-server'
 
 // Normalized events every provider adapter emits. Kept exactly as big as the
 // Claude adapter needs (PLAN Phase 0); grows only when a second adapter demands it.
@@ -34,6 +38,7 @@ export interface ProviderAdapter {
   name: string
   capabilities: { streaming: boolean; tools: boolean; midTurnGating: boolean }
   // One provider turn. Pass resume to continue an existing provider session;
-  // the new/continued session id arrives on the 'result' event.
-  startTurn(input: string, opts?: { resume?: string }): AsyncIterable<AgentEvent>
+  // the new/continued session id arrives on the 'result' event. Adapters accept
+  // their own extra options (tool grants, gate wiring) on the same object.
+  startTurn(input: string, opts?: { resume?: string; [k: string]: unknown }): AsyncIterable<AgentEvent>
 }

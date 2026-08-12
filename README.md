@@ -71,7 +71,7 @@ Routines. Cron-style schedules per bot: the morning briefing at 7am, the inbox s
 
 | Provider | Auth | Marginal cost | Status |
 |---|---|---|---|
-| Claude Code (Pro/Max subscription) | your own `claude` login on your machine | none beyond your Claude plan | first target, in design |
+| Claude Code (Pro/Max subscription) | your own `claude` login on your machine | none beyond your Claude plan | working — Phase 0 chat REPL |
 | Codex (ChatGPT Plus/Pro subscription) | your own `codex login` | none beyond your ChatGPT plan | planned (Phase 2) |
 | Anthropic API (Agent SDK + `ANTHROPIC_API_KEY`) | API key | per-token API billing | planned (Phase 2) |
 | OpenAI API (`CODEX_API_KEY`) | API key | per-token API billing | planned (Phase 2) |
@@ -106,28 +106,39 @@ Each of these is a persona folder: prompt, tools, routines, gates. The daemon do
 
 ## Project status
 
-Pre-alpha. There is no runnable code yet; the repo currently holds design documents. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 is the MVP — daemon, Telegram bridge, real starter tools, Ask/Auto modes, browser hands (shadow surface by default, on-screen optional), multi-bot handoffs, and the approval queue with its audit log; Phase 2 adds the Codex adapter, API-key providers, voice, and the desktop app with the live bot-screen preview; later phases add more bridges, full desktop hands on an isolated virtual desktop, and mobile.
+Pre-alpha. Phase 0 is done: the monorepo, the provider adapter interface, the Claude Code adapter (headless `claude -p`, stream-json, session resume, subscription auth), and a working `agentda chat` REPL with restart-surviving sessions. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 is the MVP — daemon, Telegram bridge, real starter tools, Ask/Auto modes, browser hands (shadow surface by default, on-screen optional), multi-bot handoffs, and the approval queue with its audit log; Phase 2 adds the Codex adapter, API-key providers, voice, and the desktop app with the live bot-screen preview; later phases add more bridges, full desktop hands on an isolated virtual desktop, and mobile.
 
 ## Quickstart
 
-Nothing to run yet. For honesty's sake, here is what Phase 1 is designed to feel like, so you can judge whether the shape is right:
+What exists today is the Phase 0 chat REPL: your Claude subscription, headless, with sessions that survive restarts. Prerequisites: Node 20+, pnpm, and the `claude` CLI installed and logged in (run `claude` once, use `/login`).
 
 ```bash
-# ILLUSTRATIVE ONLY: none of this exists yet
 git clone https://github.com/duckyquang/Agentda
-cd Agentda && npm install
-
-# prerequisites you bring:
-#   - claude CLI installed and logged in (run `claude` once, use /login)
-#   - a Telegram bot token from @BotFather
-
-npx agentda init      # writes agentda.toml, asks for the Telegram token
-npx agentda up        # starts the daemon, begins polling Telegram
+cd Agentda && pnpm install
+pnpm chat
 ```
 
-Then you pair your Telegram account with a one-time code, message your bot, and approval requests show up as Approve/Deny buttons. Remember the machine has to stay awake for schedules to fire. If that flow does not sound right to you, now is the cheapest possible time to open an issue.
+`/new` starts a fresh session, `/quit` exits. Built-in tools are denied in chat turns for now — until the approval gate exists (Phase 1), a bot that can edit files mid-chat is exactly what we refuse to ship.
 
-(Stack note: Node/TypeScript is the likely choice, since grammY and both vendors' SDKs are TypeScript-first, but PLAN.md is the source of truth.)
+Real transcript (recorded 2026-08-12, `claude` 2.1.206, subscription auth, no API key exported; costs are the CLI's own estimates):
+
+```
+agentda chat · claude adapter · new session
+you> My favorite color is teal. Just reply OK, one word.
+OK
+(session 47161a41 · ~$0.03 est)
+you> What is 1+1? One short sentence.
+1 + 1 equals 2.
+(session 47161a41 · ~$0.03 est)
+
+===== process restarted =====
+agentda chat · claude adapter · resuming session 47161a41…
+you> What did I say my favorite color was? One word.
+Teal.
+(session 47161a41 · ~$0.00 est)
+```
+
+The Telegram bridge, approvals, memory, and routines arrive in Phase 1 — see [PLAN.md](PLAN.md).
 
 ## Contributing
 

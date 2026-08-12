@@ -30,22 +30,23 @@ Dependency spine, so nobody reorders this casually: the adapter interface (Phase
 
 **Deliverables.**
 - pnpm-workspace monorepo: `packages/core` (adapter interface, event types, SQLite helpers), `packages/provider-claude`, `apps/cli`.
-- Provider adapter interface: `startTurn(botId, input) -> AsyncIterable<AgentEvent>`, session create/resume, capability flags (streaming, tools, structured output, mid-turn approval gating), and a normalized event set (text delta, tool call, tool result, permission request, turn result with session id).
+- Provider adapter interface: `startTurn(input, {resume}) -> AsyncIterable<AgentEvent>` — the bot/chat→session mapping lives in the session store, not the adapter — capability flags (streaming, tools, mid-turn approval gating — a structured-output flag joins if a Phase 2 adapter actually offers it), and a normalized event set kept exactly as big as the Claude adapter needs today (text delta, tool call, result with session id, warning); tool results and permission requests join when Phase 1's gate demands them.
 - Claude Code adapter: spawns the genuine `claude` binary with `-p --output-format stream-json --input-format stream-json --verbose --include-partial-messages`, parses the NDJSON stream into our events, captures `session_id` from the result, resumes with `--resume <id>`.
 - `agentda chat`: a readline REPL over the adapter proving the round trip.
 
 **Task checklist.**
-- [ ] Scaffold the monorepo (pnpm workspaces, shared tsconfig, vitest).
-- [ ] Define the `AgentEvent` union and `ProviderAdapter` interface in core. Keep it exactly as big as the Claude adapter needs; it grows only when the second adapter demands it in Phase 2.
-- [ ] Claude adapter: spawn, stream-parse, and an error taxonomy (auth missing or expired, plan limit hit, process killed). The "please run /login" failure surfaces as a clear "run `claude /login` and retry" message.
-- [ ] Never pass `--bare`: bare mode skips subscription OAuth entirely and would break the whole point. Document this trap in the adapter.
-- [ ] Warn when `ANTHROPIC_API_KEY` is exported while the user expects subscription auth, since the key silently outranks the login and bills their API org instead.
-- [ ] Session persistence: provider session ids in SQLite keyed by bot and chat, resumed across process restarts.
-- [ ] `agentda chat` multi-turn REPL.
-- [ ] Adapter tests against NDJSON fixtures recorded from real runs (labeled as such).
-- [ ] README: what Agentda is, the compliance stance, setup (install Claude Code, `claude /login`), and a real demo transcript.
+- [x] Scaffold the monorepo (pnpm workspaces, shared tsconfig, vitest).
+- [x] Define the `AgentEvent` union and `ProviderAdapter` interface in core. Keep it exactly as big as the Claude adapter needs; it grows only when the second adapter demands it in Phase 2.
+- [x] Claude adapter: spawn, stream-parse, and an error taxonomy (auth missing or expired, plan limit hit, process killed). The "please run /login" failure surfaces as a clear "run `claude /login` and retry" message.
+- [x] Never pass `--bare`: bare mode skips subscription OAuth entirely and would break the whole point. Document this trap in the adapter.
+- [x] Warn when `ANTHROPIC_API_KEY` is exported while the user expects subscription auth, since the key silently outranks the login and bills their API org instead.
+- [x] Fail-closed tool isolation in chat turns until the Phase 1 gate exists: in testing, a bare `claude -p` turn inherited the machine's global permission settings and edited files mid-chat — the exact ungated action this product exists to prevent. Mechanism (verified against claude 2.1.206's init event: zero tools, zero MCP servers, zero hook events): `--tools ""` disables every built-in, `--strict-mcp-config` with no `--mcp-config` cuts MCP off, and `--setting-sources ""` stops inheriting global settings, whose hooks otherwise run arbitrary shell inside each turn. A name-by-name blocklist was rejected — it fails open on every CLI release. Phase 1 reopens tools deliberately via the FR-11 allowlist discipline.
+- [x] Session persistence: provider session ids in SQLite keyed by bot and chat, resumed across process restarts.
+- [x] `agentda chat` multi-turn REPL.
+- [x] Adapter tests against NDJSON fixtures recorded from real runs (labeled as such; machine-identifying paths and local hook/plugin config were sanitized before commit, documented precisely in the test file — conversation and result content is verbatim).
+- [x] README: what Agentda is, the compliance stance, setup (install Claude Code, `claude /login`), and a real demo transcript.
 
-**Exit criteria.** On a machine with only a Pro/Max login and no API key exported, `agentda chat` completes a multi-turn conversation and picks it back up after a process restart via resume.
+**Exit criteria.** On a machine with only a Pro/Max login and no API key exported, `agentda chat` completes a multi-turn conversation and picks it back up after a process restart via resume. **Met 2026-08-12** — real run on `claude` 2.1.206, macOS: two turns in one process, restart, third turn recalled turn-one context in the same session; transcript in the README.
 
 **Riskiest assumption.** Anthropic keeps tolerating local personal wrappers that spawn the genuine CLI on subscription auth. They have blocked raw token reuse and third-party harnesses in stages; the genuine-binary-on-your-own-machine path is the documented mechanics and the de-facto tolerated one, but it's policy, not contract, and nobody has blessed it for a distributed product. The adapter interface exists precisely so a policy change costs us one adapter swap to API-key auth, not a rewrite.
 

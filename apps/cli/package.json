@@ -1,0 +1,9 @@
+{
+  "name": "@agentda/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@agentda/core": "workspace:*",
+    "@agentda/provider-claude": "workspace:*"
+  }
+}

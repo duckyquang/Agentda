@@ -27,7 +27,7 @@ Being straight about the subscription path, because we would rather you know thi
 
 ## How it works
 
-None of this is built yet. This is the plan of record; details live in [PLAN.md](PLAN.md) and [PRD.md](PRD.md).
+Everything below is built and running on Claude today, except where a line says otherwise. Details live in [PLAN.md](PLAN.md) and [PRD.md](PRD.md).
 
 ```
 Telegram / Slack / Discord / desktop app
@@ -71,7 +71,7 @@ Routines. Cron-style schedules per bot: the morning briefing at 7am, the inbox s
 
 | Provider | Auth | Marginal cost | Status |
 |---|---|---|---|
-| Claude Code (Pro/Max subscription) | your own `claude` login on your machine | none beyond your Claude plan | working — Phase 0 chat REPL |
+| Claude Code (Pro/Max subscription) | your own `claude` login on your machine | none beyond your Claude plan | **working** |
 | Codex (ChatGPT Plus/Pro subscription) | your own `codex login` | none beyond your ChatGPT plan | planned (Phase 2) |
 | Anthropic API (Agent SDK + `ANTHROPIC_API_KEY`) | API key | per-token API billing | planned (Phase 2) |
 | OpenAI API (`CODEX_API_KEY`) | API key | per-token API billing | planned (Phase 2) |
@@ -85,7 +85,7 @@ The API-key rows matter for anyone running bots hard enough to hit plan windows,
 
 | Interface | Notes | Status |
 |---|---|---|
-| Telegram | long polling, inline-keyboard approvals, owner pairing; voice notes arrive in Phase 2 | first bridge, planned |
+| Telegram | long polling, inline-keyboard approvals, owner pairing; voice notes arrive in Phase 2 | **built** — needs your token for a live run |
 | Desktop app | daemon dashboard: bot roster, chat, approval queue, audit log, config | planned (Phase 2) |
 | Slack | Socket Mode, so no public URL; workspace-scoped, best for work bots | planned (Phase 3) |
 | Discord | good buttons; bots can only DM users who share a server, so onboarding runs through a small private guild | planned (Phase 3) |
@@ -106,20 +106,29 @@ Each of these is a persona folder: prompt, tools, routines, gates. The daemon do
 
 ## Project status
 
-Pre-alpha. Phase 0 is done: the monorepo, the provider adapter interface, the Claude Code adapter (headless `claude -p`, stream-json, session resume, subscription auth), and a working `agentda chat` REPL with restart-surviving sessions. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 is the MVP — daemon, Telegram bridge, real starter tools, Ask/Auto modes, browser hands (shadow surface by default, on-screen optional), multi-bot handoffs, and the approval queue with its audit log; Phase 2 adds the Codex adapter, API-key providers, voice, and the desktop app with the live bot-screen preview; later phases add more bridges, full desktop hands on an isolated virtual desktop, and mobile.
+Alpha. Phase 0 and Phase 1 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, and a Telegram bridge with owner pairing.
+
+Verified against the real `claude` CLI (`pnpm test:live` — 57 tests, all green): gated actions block and only run on approval, denials stop the action, unanswered approvals time out to deny, Auto mode runs unattended while the always-ask list still blocks, memory survives a restart, a bot browses a real page with zero windows on screen, and two bots complete a task with a visible handoff and stop at the cap.
+
+Two things still need your credentials to prove end to end: a live Telegram run (needs a BotFather token) and the email recipe (needs a mailbox). Both are built and unit-tested; neither has been run against the real service. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 is the MVP — daemon, Telegram bridge, real starter tools, Ask/Auto modes, browser hands (shadow surface by default, on-screen optional), multi-bot handoffs, and the approval queue with its audit log; Phase 2 adds the Codex adapter, API-key providers, voice, and the desktop app with the live bot-screen preview; later phases add more bridges, full desktop hands on an isolated virtual desktop, and mobile.
 
 ## Quickstart
 
-What exists today is the Phase 0 chat REPL: your Claude subscription, headless, with sessions that survive restarts. Prerequisites: Node 20+, pnpm, and the `claude` CLI installed and logged in (run `claude` once, use `/login`).
+Full walkthrough in [docs/quickstart.md](docs/quickstart.md). The short version — Node 20+, pnpm, and the `claude` CLI logged in (`claude`, then `/login`):
 
 ```bash
 git clone https://github.com/duckyquang/Agentda
 cd Agentda && pnpm install
-pnpm canary   # one cheap turn: verifies login, CLI version, and that bot turns really are isolated
-pnpm chat
+pnpm canary                       # one cheap turn: login works, bot turns are isolated
+cp -r examples/bots ~/.agentda/bots
+
+export TELEGRAM_BOT_TOKEN=...     # from @BotFather
+pnpm daemon                       # prints a pairing code — DM it to your bot
 ```
 
-`/new` starts a fresh session, `/quit` exits. Built-in tools are denied in chat turns for now — until the approval gate exists (Phase 1), a bot that can edit files mid-chat is exactly what we refuse to ship.
+Until you pair, the bot answers nobody: Telegram usernames are public, and "a human approved" has to mean you.
+
+There's also `pnpm chat`, a bare REPL against your subscription with no bots, tools, or Telegram involved — useful for checking the provider path in isolation. `/new` starts a fresh session, `/quit` exits.
 
 Real transcript (recorded 2026-08-12, `claude` 2.1.206, subscription auth, no API key exported; costs are the CLI's own estimates):
 
@@ -139,7 +148,7 @@ Teal.
 (session 47161a41 · ~$0.00 est)
 ```
 
-The Telegram bridge, approvals, memory, and routines arrive in Phase 1 — see [PLAN.md](PLAN.md).
+What's next: the Codex adapter on ChatGPT-plan auth, API-key providers, voice, and the desktop app — see [PLAN.md](PLAN.md) Phase 2.
 
 ## Contributing
 

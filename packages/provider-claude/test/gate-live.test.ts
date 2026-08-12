@@ -38,7 +38,11 @@ async function runGated(opts: {
       }
     },
   })
-  const server = new HookServer(queue, () => ({ bot: 'live', chat: null, policy: defaultPolicy(), paused: false }), 'testsecret')
+  // Write is granted (available to the bot) but not auto-approved — exactly the
+  // case the gate exists for: the tool exists, and still nothing runs until a
+  // human says so.
+  const policy = { ...defaultPolicy(), grants: ['Write'] }
+  const server = new HookServer(queue, () => ({ bot: 'live', chat: null, policy, paused: false }), 'testsecret')
   await server.listen()
   const settings = server.writeSettings(dir)
 

@@ -115,6 +115,7 @@ What exists today is the Phase 0 chat REPL: your Claude subscription, headless, 
 ```bash
 git clone https://github.com/duckyquang/Agentda
 cd Agentda && pnpm install
+pnpm canary   # one cheap turn: verifies login, CLI version, and that bot turns really are isolated
 pnpm chat
 ```
 

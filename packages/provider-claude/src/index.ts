@@ -63,6 +63,44 @@ export function mapLine(line: unknown): AgentEvent[] {
   return []
 }
 
+// The CLI generation these flags and stream shapes were verified against; the
+// doctor canary flags anything outside it (NFR-6).
+export const TESTED_CLAUDE_PREFIX = '2.1.'
+
+// One source of truth for the spawn args — the doctor canary spawns with exactly
+// what the adapter spawns with, so the isolation it verifies is the isolation
+// that ships.
+//
+// NEVER add --bare here: bare mode skips the CLI's own credential chain, so a
+// subscription (/login) user would fail with "no API key" instead of using
+// their plan. That trap is the whole reason this comment exists (PLAN Phase 0).
+//
+// Fail-closed isolation, verified against claude 2.1.206 (init reports
+// tools: [], mcp_servers: [], and no hook events): --tools "" disables every
+// built-in, --strict-mcp-config with no --mcp-config yields zero MCP servers,
+// and --setting-sources "" stops inheriting the machine's global settings —
+// whose hooks otherwise run arbitrary shell inside every turn, and whose
+// permission allows let a bare turn edit files mid-chat (observed live).
+// Phase 1 reopens tools deliberately via --mcp-config + the FR-11 gate.
+export function claudeArgs(resume?: string): string[] {
+  const args = [
+    '-p',
+    '--input-format',
+    'stream-json',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+    '--tools',
+    '',
+    '--strict-mcp-config',
+    '--setting-sources',
+    '',
+  ]
+  if (resume) args.push('--resume', resume)
+  return args
+}
+
 export class ClaudeAdapter implements ProviderAdapter {
   name = 'claude'
   capabilities = { streaming: true, tools: true, midTurnGating: true }
@@ -81,34 +119,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       }
     }
 
-    // NEVER add --bare here: bare mode skips the CLI's own credential chain, so a
-    // subscription (/login) user would fail with "no API key" instead of using
-    // their plan. That trap is the whole reason this comment exists (PLAN Phase 0).
-    //
-    // Fail-closed isolation, verified against claude 2.1.206 (init reports
-    // tools: [], mcp_servers: [], and no hook events): --tools "" disables every
-    // built-in, --strict-mcp-config with no --mcp-config yields zero MCP servers,
-    // and --setting-sources "" stops inheriting the machine's global settings —
-    // whose hooks otherwise run arbitrary shell inside every turn, and whose
-    // permission allows let a bare turn edit files mid-chat (observed live).
-    // Phase 1 reopens tools deliberately via --mcp-config + the FR-11 gate.
-    const args = [
-      '-p',
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-      '--tools',
-      '',
-      '--strict-mcp-config',
-      '--setting-sources',
-      '',
-    ]
-    if (opts.resume) args.push('--resume', opts.resume)
-
-    const child = spawn(this.bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(this.bin, claudeArgs(opts.resume), { stdio: ['pipe', 'pipe', 'pipe'] })
 
     let spawnErr: AdapterError | undefined
     child.on('error', (err: NodeJS.ErrnoException) => {

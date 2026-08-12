@@ -8,6 +8,7 @@
   },
   "scripts": {
     "chat": "tsx apps/cli/src/chat.ts",
+    "canary": "tsx apps/cli/src/canary.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

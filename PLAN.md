@@ -45,6 +45,8 @@ Dependency spine, so nobody reorders this casually: the adapter interface (Phase
 - [x] `agentda chat` multi-turn REPL.
 - [x] Adapter tests against NDJSON fixtures recorded from real runs (labeled as such; machine-identifying paths and local hook/plugin config were sanitized before commit, documented precisely in the test file — conversation and result content is verbatim).
 - [x] README: what Agentda is, the compliance stance, setup (install Claude Code, `claude /login`), and a real demo transcript.
+- [x] `pnpm canary` provider health check (NFR-6 made practical; not named "doctor" — that collides with pnpm's own built-in command): checks install and version against the tested range, then spends one cheap real turn asserting the isolation posture still holds — zero built-in tools, zero MCP servers, no hook events, straight from the init event and stream, never from model claims. Run it after every claude upgrade; the canary spawns with the exact same `claudeArgs()` the adapter uses, so what it verifies is what ships.
+- [x] CI on every push: typecheck + tests via GitHub Actions. The fixture tests parse recorded streams — no claude binary, no auth, no quota — so `main` provably stays green without touching the subscription question.
 
 **Exit criteria.** On a machine with only a Pro/Max login and no API key exported, `agentda chat` completes a multi-turn conversation and picks it back up after a process restart via resume. **Met 2026-08-12** — real run on `claude` 2.1.206, macOS: two turns in one process, restart, third turn recalled turn-one context in the same session; transcript in the README.
 
@@ -55,6 +57,8 @@ Dependency spine, so nobody reorders this casually: the adapter interface (Phase
 **Goal.** Personas reachable from Telegram, with memory, real starter tools, Ask/Auto interaction modes, browser hands that don't take over your screen, gated approvals with an audit log, scheduled routines, and two bots able to hand work to each other. Still the smallest thing that is actually GrokBot-shaped — but this MVP is deliberately heavier than a minimal chat bot, because screen work and multi-bot are the point of the product, not garnish.
 
 **Pressure valve, decided now.** If this phase drags: the on-screen browser surface and multi-bot threads slip to Phase 2. Shadow browsing, the mode system, approvals, and the audit log do not slip — they are the product's spine and its safety story.
+
+**Build order inside this phase, so the spine can't be cut under deadline pressure:** 1) approval gate + audit log + mode engine, each landing with its break-it test — nothing else starts until a gated tool provably blocks, times out to deny, and logs; 2) Telegram bridge + owner pairing; 3) starter tool recipes through the gate; 4) routines + usage guardrails; 5) shadow browser; 6) multi-bot handoffs; 7) on-screen surface. The order is the pressure valve in action: what slips is whatever hasn't started yet, never the spine.
 
 **Deliverables.**
 - `apps/daemon`: a long-running Node process owning SQLite, the provider adapter, the Telegram bridge, and the scheduler, with launchd (macOS) and systemd (Linux) install docs.

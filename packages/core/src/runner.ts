@@ -30,9 +30,9 @@ export class TurnRunner {
       adapters: Map<string, ProviderAdapter>
       guardrails?: Guardrails
       settingsPath: string
-      // How to launch Agentda's own MCP server for a bot. Injected so core
-      // stays free of assumptions about where the package lives.
-      agentdaMcpEntry?: (p: Persona) => { command: string; args: string[]; env?: Record<string, string> }
+      // How to launch Agentda's own MCP servers for a bot. Injected so core
+      // stays free of assumptions about where the packages live.
+      mcpEntries?: (p: Persona) => Record<string, { command: string; args: string[]; env?: Record<string, string> }>
     },
   ) {}
 
@@ -98,10 +98,7 @@ export class TurnRunner {
   // Built fresh each turn so bot dir, scope, and server path are always right —
   // no placeholder config for the user to hand-edit, and no stale paths.
   private materializeMcpConfig(persona: Persona, runDir: string): string | undefined {
-    const servers: Record<string, unknown> = {}
-    if (persona.agentdaTools && this.deps.agentdaMcpEntry) {
-      servers.agentda = this.deps.agentdaMcpEntry(persona)
-    }
+    const servers: Record<string, unknown> = { ...this.deps.mcpEntries?.(persona) }
     if (persona.mcpConfig && existsSync(persona.mcpConfig)) {
       const extra = JSON.parse(readFileSync(persona.mcpConfig, 'utf8'))
       Object.assign(servers, extra.mcpServers ?? {})
@@ -129,6 +126,13 @@ function toolBriefing(p: Persona, mcpConfig: string | undefined): string {
       p.scope.length
         ? `- \`mcp__agentda__file_read\` / \`file_list\` / \`file_write\`: files under ${p.scope.join(', ')}.`
         : '- file tools exist but no directories are in scope, so they will fail.',
+    )
+  }
+  if (p.browser) {
+    lines.push(
+      `- \`mcp__browser__navigate\` / \`read\` / \`click\` / \`type\` / \`screenshot\`: a real browser, running ${
+        p.browserSurface === 'shadow' ? 'invisibly in the background' : 'in a visible window'
+      }. Read the page before clicking; selectors you did not read are guesses.`,
     )
   }
   lines.push(

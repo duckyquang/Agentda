@@ -19,6 +19,8 @@ const persona = (routines: Persona['routines']): Persona => ({
   policy: { mode: 'ask', grants: [], autoApprove: [], alwaysAsk: [] },
   tools: [],
   agentdaTools: false,
+  browser: false,
+  browserSurface: 'shadow' as const,
   scope: [],
   routines,
 })

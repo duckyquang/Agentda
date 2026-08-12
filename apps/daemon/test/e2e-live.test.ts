@@ -68,10 +68,19 @@ function harness(personas: Persona[], opts: { answer?: 'allow' | 'deny' | 'never
       hook,
       adapters: new Map([['claude', new ClaudeAdapter()]]),
       settingsPath: hook.writeSettings(join(root, 'run')),
-      agentdaMcpEntry: (p) => ({
-        command: process.execPath,
-        args: [join(repoRoot, 'node_modules/tsx/dist/cli.mjs'), join(repoRoot, 'packages/mcp-agentda/src/index.ts')],
-        env: { AGENTDA_BOT_DIR: p.dir, AGENTDA_SCOPE: p.scope.join(':') },
+      mcpEntries: (p) => ({
+        agentda: {
+          command: process.execPath,
+          args: [join(repoRoot, 'node_modules/tsx/dist/cli.mjs'), join(repoRoot, 'packages/mcp-agentda/src/index.ts')],
+          env: { AGENTDA_BOT_DIR: p.dir, AGENTDA_SCOPE: p.scope.join(':') },
+        },
+        ...(p.browser && {
+          browser: {
+            command: process.execPath,
+            args: [join(repoRoot, 'node_modules/tsx/dist/cli.mjs'), join(repoRoot, 'packages/mcp-browser/src/index.ts')],
+            env: { AGENTDA_BROWSER_PROFILE: join(p.dir, 'browser-profile'), AGENTDA_BROWSER_SURFACE: p.browserSurface },
+          },
+        }),
       }),
     })
   const audit = () => db.prepare('SELECT tool, decision, source, mode FROM audit_log ORDER BY id').all() as any[]

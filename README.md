@@ -4,11 +4,11 @@ AI teammates that do real work in your tools, gated by your approval, running on
 
 ## What is Agentda
 
-Agentda runs a roster of AI bot personas on your own machine. Each bot has a job (chief of staff, outbound sales, bug reproduction), its own memory, and access to real tools through MCP: your email, calendar, CRM, repos, spreadsheets. Bots work in the background on schedules or on demand from a chat message, and anything consequential stops at an approval queue until you tap Approve. Sending an email, merging a PR, filing an expense: none of it happens silently.
+Agentda runs a roster of AI bot personas on your own machine. Each bot has a job (chief of staff, outbound sales, bug reproduction), its own memory, and access to real tools through MCP: your email, calendar, CRM, repos, spreadsheets. Bots work in the background on schedules or on demand from a chat message, collaborate in shared threads by handing work to each other, and anything consequential stops at an approval queue until you tap Approve. Sending an email, merging a PR, filing an expense: none of it happens silently. When a job needs hands on a screen, a bot browses in its own shadow browser by default — you follow along via screenshots or a live preview while you keep using your machine; it never takes your mouse.
 
 Two commitments shape the whole design:
 
-1. Human-gated by default. Bots draft, research, and prepare. Side effects wait for you. You loosen the gate per bot and per tool, deliberately, not the other way around.
+1. Human-gated by default. Bots draft, research, and prepare. Side effects wait for you. You loosen the gate per bot and per tool, deliberately, not the other way around — up to and including flipping a bot you trust into Auto mode, which trades the tap for a complete audit trail, hard budgets, and an always-ask list for the scary stuff.
 2. Bring your own model. Agentda does not resell AI. It drives the official agent CLIs you already have installed and logged into. If you pay for Claude Pro/Max or ChatGPT Plus/Pro, that is your model bill. There is no Agentda subscription and no markup.
 
 ## Why
@@ -16,6 +16,8 @@ Two commitments shape the whole design:
 GrokBot proved the product shape: persistent AI staff living in your chat apps, doing real work with real tools. But it is locked to xAI's models and xAI's pricing. We wanted the same thing with the provider as a swappable detail, and with the economics of software you run yourself: open source, local-first, and free beyond the AI subscription you were paying for anyway.
 
 The unlock is that both major vendors now ship headless-capable agent CLIs that authenticate with consumer subscriptions. Claude Code runs non-interactive turns with `claude -p`; Codex does the same with `codex exec`. Agentda orchestrates those binaries instead of reimplementing an agent loop against raw APIs. That means no API keys to get started, and the vendors' own tool-use, sandboxing, and session machinery doing the heavy lifting.
+
+The other thing we refuse to inherit from current agent products: screen work that holds your screen hostage. Every mainstream computer-use feature takes over your browser or desktop while it runs. Agentda's bots do their on-screen work in the background by default, and even when you choose to watch them work in a visible window, the bot never injects OS-level input and can't see your other windows — the one honest caveat, the moment a window grabs focus and could catch typing in flight, is handled by pausing the bot and discarding whatever arrived.
 
 Being straight about the subscription path, because we would rather you know this up front:
 
@@ -54,6 +56,12 @@ Chat bridges. Thin translators between a messaging platform and the daemon: inbo
 Bot personas. A persona is configuration, not code: a system prompt, a provider and model, an MCP tool list, memory, routines, and approval rules, all living as plain files in one folder per bot. Creating a bot is writing a folder. Sharing a bot is copying that folder.
 
 Approval queue. Tool calls get intercepted before execution and parked until you decide. On Claude Code the gate is native: `--permission-prompt-tool` points at an MCP tool the daemon hosts, so the CLI itself blocks mid-turn until you answer. Codex's exec mode has no interactive prompter, so there the gate moves into the tools themselves: consequential actions are only reachable through Agentda-hosted MCP tools that hold the call until you approve, with the OS-level sandbox (Seatbelt on macOS, bwrap/seccomp on Linux) containing everything else — and until we have proven that holds in practice, Codex bots simply do not get outbound tools. Decisions arrive as button taps in chat: Telegram inline keyboards, Slack Block Kit, Discord components. Per-bot policies mark genuinely read-only tools as auto-approved so the queue only holds things that matter.
+
+Modes. Every bot runs in Ask or Auto. Ask (the default) blocks gated actions on your tap. Auto runs them unattended — but never invisibly: the same audit log, the same tool and domain allowlists, the same budgets, plus a per-bot always-ask list (payments, deletions, bulk sends out of the box) that keeps asking even in Auto. Flipping a bot to Auto shows you exactly what it will now do without you; one global pause drops everything back to Ask.
+
+Browser hands. Bots get a real browser from the MVP onward, on one of two surfaces. Shadow (default): an isolated headless browser — nothing on your screen, no stolen focus; progress arrives as screenshots in the thread, and the desktop app adds a live preview with a take-over button. On-screen: the same automation in a visible window, for when you want to watch or a site refuses headless. Either way the bot drives the browser over CDP — it never injects OS-level input and can't see your other windows; the one caveat is that a visible window can receive your typing while it holds focus, so on-screen mode pauses and discards input at exactly those moments. Full OS-level desktop control comes later (Phase 4) and defaults to an isolated virtual desktop, not your real one.
+
+Multi-bot threads. Several bots can share one thread, from the MVP onward. Addressing is explicit — a bot acts when named or handed work — handoffs are visible in the thread and capped per task so two models can't ping-pong through your quota, and approvals always route to you, never to another bot.
 
 Memory. Two layers. Session transcripts come free from the CLIs (`claude --resume`, `codex exec resume`), giving each bot conversational continuity. On top, each bot keeps durable notes as plain Markdown files in its folder (contacts, preferences, running state of long tasks), injected into context each run and editable like any other file on your disk.
 
@@ -98,7 +106,7 @@ Each of these is a persona folder: prompt, tools, routines, gates. The daemon do
 
 ## Project status
 
-Pre-alpha. There is no runnable code yet; the repo currently holds design documents. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 adds the daemon, the Telegram bridge, real starter tools, and the approval queue; Phase 2 adds the Codex adapter, API-key providers, and the desktop app; later phases add more bridges, multi-bot threads, browser hands, and mobile.
+Pre-alpha. There is no runnable code yet; the repo currently holds design documents. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 is the MVP — daemon, Telegram bridge, real starter tools, Ask/Auto modes, browser hands (shadow surface by default, on-screen optional), multi-bot handoffs, and the approval queue with its audit log; Phase 2 adds the Codex adapter, API-key providers, voice, and the desktop app with the live bot-screen preview; later phases add more bridges, full desktop hands on an isolated virtual desktop, and mobile.
 
 ## Quickstart
 

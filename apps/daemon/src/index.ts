@@ -235,6 +235,24 @@ if (owners.count('telegram') === 0) {
   console.log(`\nPAIRING CODE: ${code}\nDM this code to your bot on Telegram to claim it. Until then it answers nobody.\n`)
 }
 
+let shuttingDown = false
+const shutdown = async (code = 0) => {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log('\nshutting down…')
+  scheduler.stop()
+  queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
+  await bridge.bot.stop().catch(() => {})
+  await hook.close().catch(() => {})
+  db.close()
+  process.exit(code)
+}
+// Registered BEFORE start(): grammY's start() promise does not resolve while
+// polling, so anything after it never runs and Ctrl-C would kill the daemon
+// with approvals still parked and the db mid-write.
+process.on('SIGINT', () => void shutdown())
+process.on('SIGTERM', () => void shutdown())
+
 scheduler.start()
 try {
   await bridge.bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`bridge live as @${me.username}`) })
@@ -247,20 +265,5 @@ try {
         ? 'Another process is already polling this bot token — stop the other daemon first.'
         : `Telegram bridge failed: ${e.message}`,
   )
-  queue.denyAll('daemon failed to start')
-  await hook.close()
-  db.close()
-  process.exit(1)
+  await shutdown(1)
 }
-
-const shutdown = async () => {
-  console.log('\nshutting down…')
-  scheduler.stop()
-  queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
-  await bridge.bot.stop()
-  await hook.close()
-  db.close()
-  process.exit(0)
-}
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)

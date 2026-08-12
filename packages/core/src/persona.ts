@@ -23,6 +23,7 @@ export interface Persona {
   routines: { id: string; cron: string; prompt: string; enabled: boolean }[]
   quietHours?: { start: number; end: number } // local hours, [start, end)
   dailyTurnCap?: number
+  weeklyTurnCap?: number
 }
 
 const asStringArray = (v: unknown): string[] =>
@@ -97,6 +98,7 @@ export function loadPersona(dir: string): Persona {
         ? { start: cfg.quiet_hours.start, end: cfg.quiet_hours.end }
         : undefined,
     dailyTurnCap: typeof cfg.daily_turn_cap === 'number' ? cfg.daily_turn_cap : undefined,
+    weeklyTurnCap: typeof cfg.weekly_turn_cap === 'number' ? cfg.weekly_turn_cap : undefined,
   }
 }
 

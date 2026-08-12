@@ -17,7 +17,7 @@ GrokBot proved the product shape: persistent AI staff living in your chat apps, 
 
 The unlock is that both major vendors now ship headless-capable agent CLIs that authenticate with consumer subscriptions. Claude Code runs non-interactive turns with `claude -p`; Codex does the same with `codex exec`. Agentda orchestrates those binaries instead of reimplementing an agent loop against raw APIs. That means no API keys to get started, and the vendors' own tool-use, sandboxing, and session machinery doing the heavy lifting.
 
-The other thing we refuse to inherit from current agent products: screen work that holds your screen hostage. Every mainstream computer-use feature takes over your browser or desktop while it runs. Agentda's bots do their on-screen work in the background by default, and even when you choose to watch them work in a visible window, the bot never injects OS-level input and can't see your other windows — the one honest caveat, the moment a window grabs focus and could catch typing in flight, is handled by pausing the bot and discarding whatever arrived.
+The other thing we refuse to inherit from current agent products: screen work that holds your screen hostage. Every mainstream computer-use feature takes over your browser or desktop while it runs. Agentda's bots do their on-screen work in the background by default, and even when you choose to watch them work in a visible window, the bot never injects OS-level input and can't see your other windows. The honest caveat: a window that just opened holds focus, so keystrokes you have in flight can land in it. On-screen mode waits out that moment before acting and never raises its window uninvited.
 
 Being straight about the subscription path, because we would rather you know this up front:
 
@@ -27,7 +27,7 @@ Being straight about the subscription path, because we would rather you know thi
 
 ## How it works
 
-Everything below is built and running on Claude today, except where a line says otherwise. Details live in [PLAN.md](PLAN.md) and [PRD.md](PRD.md).
+The daemon, gate, modes, memory, browser hands, multi-bot, routines, and the Telegram bridge are built and working on Claude today. Paragraphs about Codex, Slack, Discord, and the desktop app describe the design, not shipped code — see [PLAN.md](PLAN.md) for what lands when.
 
 ```
 Telegram / Slack / Discord / desktop app
@@ -59,7 +59,7 @@ Approval queue. Tool calls get intercepted before execution and parked until you
 
 Modes. Every bot runs in Ask or Auto. Ask (the default) blocks gated actions on your tap. Auto runs them unattended — but never invisibly: the same audit log, the same tool and domain allowlists, the same budgets, plus a per-bot always-ask list (payments, deletions, bulk sends out of the box) that keeps asking even in Auto. Flipping a bot to Auto shows you exactly what it will now do without you; one global pause drops everything back to Ask.
 
-Browser hands. Bots get a real browser from the MVP onward, on one of two surfaces. Shadow (default): an isolated headless browser — nothing on your screen, no stolen focus; progress arrives as screenshots in the thread, and the desktop app adds a live preview with a take-over button. On-screen: the same automation in a visible window, for when you want to watch or a site refuses headless. Either way the bot drives the browser over CDP — it never injects OS-level input and can't see your other windows; the one caveat is that a visible window can receive your typing while it holds focus, so on-screen mode pauses and discards input at exactly those moments. Full OS-level desktop control comes later (Phase 4) and defaults to an isolated virtual desktop, not your real one.
+Browser hands. Bots get a real browser from the MVP onward, on one of two surfaces. Shadow (default): an isolated headless browser — nothing on your screen, no stolen focus; the bot can take screenshots and describe what it sees; posting them as images in the thread, and the desktop live preview, come with Phase 2. On-screen: the same automation in a visible window, for when you want to watch or a site refuses headless. Either way the bot drives the browser over CDP — it never injects OS-level input and can't see your other windows; the caveat is that a visible window can receive your typing while it holds focus, so on-screen mode waits out the launch moment before acting. Full OS-level desktop control comes later (Phase 4) and defaults to an isolated virtual desktop, not your real one.
 
 Multi-bot threads. Several bots can share one thread, from the MVP onward. Addressing is explicit — a bot acts when named or handed work — handoffs are visible in the thread and capped per task so two models can't ping-pong through your quota, and approvals always route to you, never to another bot.
 
@@ -120,6 +120,8 @@ Full walkthrough in [docs/quickstart.md](docs/quickstart.md). The short version 
 git clone https://github.com/duckyquang/Agentda
 cd Agentda && pnpm install
 pnpm canary                       # one cheap turn: login works, bot turns are isolated
+
+mkdir -p ~/.agentda
 cp -r examples/bots ~/.agentda/bots
 
 export TELEGRAM_BOT_TOKEN=...     # from @BotFather

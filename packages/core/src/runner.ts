@@ -129,7 +129,7 @@ export class TurnRunner {
 }
 
 function personalGuardrails(p: Persona): Guardrails {
-  return { perDay: p.dailyTurnCap, quietHours: p.quietHours }
+  return { perDay: p.dailyTurnCap, perWeek: p.weeklyTurnCap, quietHours: p.quietHours }
 }
 
 // MCP tools are deferred: they don't appear in the model's initial tool list, so

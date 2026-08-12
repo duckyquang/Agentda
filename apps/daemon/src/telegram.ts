@@ -30,7 +30,7 @@ export function createBridge(deps: BridgeDeps) {
         await ctx.reply('Paired. This account is now the owner — only you can talk to these bots or answer approvals.')
         return false
       }
-      await ctx.reply('Send the pairing code shown by `agentda init` to claim this bot.')
+      await ctx.reply('Send the pairing code the daemon printed at startup to claim this bot.')
       return false
     }
     deps.logDropped(String(userId ?? 'unknown'), 'not a paired owner')

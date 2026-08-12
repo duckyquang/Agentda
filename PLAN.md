@@ -99,7 +99,7 @@ Dependency spine, so nobody reorders this casually: the adapter interface (Phase
 - ✅ a bot flipped to Auto completes a gated-class action unattended with mode, action, and result logged, while its always-ask list still blocks and times out to deny — live.
 - ✅ auto-approved read-only tools run without asking and are still audited — live.
 - ✅ memory survives a restart — live: one stack writes memory, a brand-new stack with no session to resume reads the fact back.
-- ✅ a bot fills in a real web page in shadow mode with zero windows on screen, and a gated click is asked, blocked, and times out to deny while navigation auto-approves — live.
+- ✅ a bot works a real web page in shadow mode with zero windows on screen (navigate + read), and a gated click is asked, blocked, and times out to deny while navigation auto-approves — live. Form *typing* is implemented but not yet covered by a test.
 - ✅ two bots complete a task with one visible handoff and stop at the turn cap — live, two real bots.
 - ✅ a cron routine fires at most once per occurrence and skips (never replays) what was missed during sleep — unit-tested against the ledger; a multi-day unattended run has not been done.
 - ⏳ a Telegram message from the paired owner is answered while a stranger's is dropped and logged — the access-control rules are tested through grammY's own update dispatch (including that a non-owner's approval tap leaves the request open), but a live run needs a BotFather token.

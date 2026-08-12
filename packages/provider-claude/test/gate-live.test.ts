@@ -67,7 +67,10 @@ describe.runIf(live)('gate against the real claude CLI', () => {
       answer: 'deny',
     })
     expect(existsSync(target)).toBe(false) // the gate physically stopped it
-    expect(audit).toMatchObject([{ tool: 'Write', decision: 'deny', source: 'human-tap', mode: 'ask' }])
+    // A model may retry after a denial, so assert on every row rather than a
+    // fixed length: what matters is that nothing was ever allowed.
+    expect(audit.length).toBeGreaterThan(0)
+    expect(audit.every((r) => r.tool === 'Write' && r.decision === 'deny' && r.mode === 'ask')).toBe(true)
   }, 180_000)
 
   it('allows a gated write only after the human approves', async () => {
@@ -78,7 +81,7 @@ describe.runIf(live)('gate against the real claude CLI', () => {
     })
     expect(existsSync(target)).toBe(true)
     expect(readFileSync(target, 'utf8')).toContain('hi')
-    expect(audit).toMatchObject([{ tool: 'Write', decision: 'allow', source: 'human-tap' }])
+    expect(audit.some((r) => r.tool === 'Write' && r.decision === 'allow' && r.source === 'human-tap')).toBe(true)
   }, 180_000)
 
   it('an unanswered approval times out to deny without wedging the turn', async () => {
@@ -89,6 +92,8 @@ describe.runIf(live)('gate against the real claude CLI', () => {
       timeoutMs: 5_000,
     })
     expect(existsSync(target)).toBe(false)
-    expect(audit).toMatchObject([{ decision: 'deny', source: 'timeout' }])
+    expect(audit.length).toBeGreaterThan(0)
+    expect(audit.every((r) => r.decision === 'deny')).toBe(true)
+    expect(audit.some((r) => r.source === 'timeout')).toBe(true)
   }, 180_000)
 })

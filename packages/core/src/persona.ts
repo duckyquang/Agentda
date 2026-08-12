@@ -16,6 +16,7 @@ export interface Persona {
   tools: string[] // built-in tool grants (availability only; the gate still runs)
   agentdaTools: boolean // attach Agentda's own MCP server (memory + scoped files)
   browser: boolean // attach browser hands (opt-in: Playwright is a heavy install)
+  email: boolean // attach IMAP/SMTP hands (opt-in: needs mailbox credentials)
   browserSurface: 'shadow' | 'on-screen'
   scope: string[] // directories the file tools may touch, absolute
   mcpConfig?: string // extra MCP config file, relative to the bot dir
@@ -67,6 +68,7 @@ export function loadPersona(dir: string): Persona {
             ...asStringArray(cfg.tools),
             ...(cfg.agentda_tools !== false ? ['mcp__agentda__*'] : []),
             ...(cfg.browser === true ? ['mcp__browser__*'] : []),
+            ...(cfg.email === true ? ['mcp__email__*'] : []),
             ...mcpServerNames(dir, cfg).map((s) => `mcp__${s}__*`),
           ],
       autoApprove: asStringArray(cfg.auto_approve),
@@ -78,6 +80,7 @@ export function loadPersona(dir: string): Persona {
     tools: asStringArray(cfg.tools),
     agentdaTools: cfg.agentda_tools !== false,
     browser: cfg.browser === true,
+    email: cfg.email === true,
     browserSurface: cfg.browser_surface === 'on-screen' ? 'on-screen' : 'shadow',
     scope: asStringArray(cfg.scope).map((p) => (p.startsWith('~') ? join(homedir(), p.slice(1)) : resolve(p))),
     mcpConfig: typeof cfg.mcp_config === 'string' ? join(dir, cfg.mcp_config) : undefined,

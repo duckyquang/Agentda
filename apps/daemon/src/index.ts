@@ -84,6 +84,17 @@ const runner = new TurnRunner({
         env: { AGENTDA_BOT_DIR: p.dir, AGENTDA_SCOPE: p.scope.join(':') },
       },
     }),
+    ...(p.email && {
+      email: {
+        command: process.execPath,
+        args: [tsxLoader, join(repoRoot, 'packages/mcp-email/src/index.ts')],
+        // Mailbox credentials come from the daemon's environment, never from
+        // bot files on disk.
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(([k]) => k.startsWith('AGENTDA_IMAP_') || k.startsWith('AGENTDA_SMTP_')),
+        ) as Record<string, string>,
+      },
+    }),
     ...(p.browser && {
       browser: {
         command: process.execPath,

@@ -1,0 +1,24 @@
+id = "inbox"
+name = "Inbox Manager"
+provider = "claude"
+
+# Stay in Ask mode. This bot reads mail — attacker-controlled text — and can
+# send mail. That combination is exactly what the approval gate is for.
+mode = "ask"
+
+# Needs AGENTDA_IMAP_* (and optionally AGENTDA_SMTP_*) in the daemon's env.
+email = true
+
+auto_approve = ["mcp__agentda__memory_read", "mcp__email__email_list", "mcp__email__email_read"]
+
+# Sending is never automatic, even if you flip this bot to Auto.
+always_ask = ["Bash", "shell", "mcp__*__shell*", "mcp__*__exec*", "mcp__email__email_send", "mcp__agentda__file_write"]
+
+daily_turn_cap = 60
+quiet_hours = { start = 23, end = 7 }
+
+[[routines]]
+id = "morning-inbox"
+cron = "0 8 * * 1-5"
+prompt = "Check for unread mail. Summarize anything that needs me in a few lines, and say if nothing does. Do not reply to anything."
+enabled = false

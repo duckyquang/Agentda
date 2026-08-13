@@ -122,11 +122,11 @@ Phase 2 started 2026-08-13 without waiting on either: nothing in it depends on T
 - Tauri desktop app mirroring the GrokBot-style layout (bot list with previews and badges, chat pane, bot settings): chat with live checklist rendering from streaming AgentEvents, the bot-screen live preview pane for shadow browser work (CDP screencast with Take over / Hand back), ASK/AUTO badges with the mode toggle, persona create/edit, an approvals inbox, the audit log viewer with filtering, routine run history. It talks to the daemon over a loopback-only, token-authenticated HTTP+WebSocket API, and the daemon ships as a Tauri sidecar.
 
 **Task checklist.**
-- [ ] Local daemon API (HTTP + WS on loopback, token auth).
-- [ ] ADR first, adapter second: `codex exec` vs `codex mcp-server` vs the Codex SDK as the embedding, decided by testing blocking approval MCP tools against the real binary (openai/codex#24135 is the constraint to beat), not by vibes.
-- [ ] Codex adapter with event mapping into `AgentEvent`, auth detection, limit errors surfaced the same way as Claude's, and the no-outbound-tools restriction enforced in config until the gate ADR proves otherwise.
-- [ ] Core agent loop for API-key adapters. One OpenAI-compatible client covers OpenAI and xAI; Anthropic and Gemini get thin clients of their own.
-- [ ] Failover: ordered provider list, fresh-session-with-rebuilt-context semantics, in-thread surfacing, API-key opt-in gate.
+- [ ] Local daemon API (HTTP + WS on loopback, token auth) — lands with the desktop app.
+- [x] ADR first, adapter second ([ADR 0003](docs/adr/0003-codex-gate-and-embedding.md)): `codex exec` wins. Decided by testing the real binary — hooks fire for every tool including MCP, MCP calls are cancelled regardless of configuration, and a denial races the tool it should block. The embedding buys nothing against those.
+- [x] Codex adapter: JSONL event mapping into `AgentEvent`, auth detection (`codex login status` reports on **stderr**), limit errors surfaced like Claude's, `--ignore-user-config` so the user's own Codex setup is untouched, and read-only containment enforced by default. Live tests cover containment, conversation, injected memory, and thread resume.
+- [x] Core agent loop for API-key adapters, with the gate as a plain in-process call — genuinely mid-turn, no hook and no race. One OpenAI-compatible client covers OpenAI, xAI, and Ollama; Anthropic and Gemini have their own. A hard step cap stops a looping model spending the user's money. Verified live against a local Ollama model calling real MCP tools.
+- [x] Failover: ordered provider list, fresh session with context rebuilt from memory (never claimed as resumed), the switch announced in the thread, and metered providers refused without a per-bot opt-in. Only auth and limit failures fail over — retrying a crash elsewhere just spends twice.
 - [ ] Voice-note pipeline and the transcription ADR; desktop compose bar gets the mic.
 - [ ] Free-text approval parsing and amendment re-render flow.
 - [ ] Persona management (daemon CRUD plus desktop UI), per-persona provider, model, and sandbox settings.

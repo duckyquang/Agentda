@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@agentda/core": "workspace:*",
-    "@agentda/provider-claude": "workspace:*"
+    "@agentda/provider-claude": "workspace:*",
+    "@agentda/provider-codex": "workspace:*"
   }
 }

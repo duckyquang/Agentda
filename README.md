@@ -55,7 +55,7 @@ Chat bridges. Thin translators between a messaging platform and the daemon: inbo
 
 Bot personas. A persona is configuration, not code: a system prompt, a provider and model, an MCP tool list, memory, routines, and approval rules, all living as plain files in one folder per bot. Creating a bot is writing a folder. Sharing a bot is copying that folder.
 
-Approval queue. Tool calls get intercepted before execution and parked until you decide. On Claude Code the gate is a PreToolUse hook the daemon answers over loopback, so the CLI itself blocks mid-turn until you decide ([ADR 0001](docs/adr/0001-approval-gate-mechanism.md)). Codex's exec mode has no interactive prompter, so there the gate moves into the tools themselves: consequential actions are only reachable through Agentda-hosted MCP tools that hold the call until you approve, with the OS-level sandbox (Seatbelt on macOS, bwrap/seccomp on Linux) containing everything else — and until we have proven that holds in practice, Codex bots simply do not get outbound tools. Decisions arrive as button taps in chat: Telegram inline keyboards, Slack Block Kit, Discord components. Per-bot policies mark genuinely read-only tools as auto-approved so the queue only holds things that matter.
+Approval queue. Tool calls get intercepted before execution and parked until you decide. On Claude Code the gate is a PreToolUse hook the daemon answers over loopback, so the CLI itself blocks mid-turn until you decide ([ADR 0001](docs/adr/0001-approval-gate-mechanism.md)). Codex is different, and the [provider matrix](docs/providers.md) explains why in full: its hook can deny a call but loses a race against the tool it should block, so Codex bots run read-only and are contained by the OS sandbox instead. They converse and read; they don't get hands. Decisions arrive as button taps in chat: Telegram inline keyboards, Slack Block Kit, Discord components. Per-bot policies mark genuinely read-only tools as auto-approved so the queue only holds things that matter.
 
 Modes. Every bot runs in Ask or Auto. Ask (the default) blocks gated actions on your tap. Auto runs them unattended — but never invisibly: the same audit log, the same tool and domain allowlists, the same budgets, plus a per-bot always-ask list (payments, deletions, bulk sends out of the box) that keeps asking even in Auto. Flipping a bot to Auto shows you exactly what it will now do without you; one global pause drops everything back to Ask.
 
@@ -72,12 +72,12 @@ Routines. Cron-style schedules per bot: the morning briefing at 7am, the inbox s
 | Provider | Auth | Marginal cost | Status |
 |---|---|---|---|
 | Claude Code (Pro/Max subscription) | your own `claude` login on your machine | none beyond your Claude plan | **working** |
-| Codex (ChatGPT Plus/Pro subscription) | your own `codex login` | none beyond your ChatGPT plan | planned (Phase 2) |
-| Anthropic API (Agent SDK + `ANTHROPIC_API_KEY`) | API key | per-token API billing | planned (Phase 2) |
-| OpenAI API (`CODEX_API_KEY`) | API key | per-token API billing | planned (Phase 2) |
-| xAI API (Grok) | API key | per-token API billing | planned (Phase 2) |
-| Google Gemini API | API key | per-token API billing | planned (Phase 2) |
-| Local models (Ollama and friends) | none | your electricity | planned (Phase 3) |
+| Codex (ChatGPT Plus/Pro subscription) | your own `codex login` | none beyond your ChatGPT plan | **working** — read-only, see [providers](docs/providers.md) |
+| Anthropic API (`ANTHROPIC_API_KEY`) | API key | per-token API billing | built, unverified against a real key |
+| OpenAI API (`OPENAI_API_KEY`) | API key | per-token API billing | built, unverified against a real key |
+| xAI API (Grok) | API key | per-token API billing | built, unverified against a real key |
+| Google Gemini API | API key | per-token API billing | built, unverified against a real key |
+| Local models (Ollama) | none | your electricity | **working**, live-verified |
 
 The API-key rows matter for anyone running bots hard enough to hit plan windows, and for Business/Enterprise setups where the sanctioned automation credential is an API key or access token anyway.
 

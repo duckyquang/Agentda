@@ -29,6 +29,9 @@ importers:
       '@agentda/provider-claude':
         specifier: workspace:*
         version: link:../../packages/provider-claude
+      '@agentda/provider-codex':
+        specifier: workspace:*
+        version: link:../../packages/provider-codex
 
   apps/daemon:
     dependencies:

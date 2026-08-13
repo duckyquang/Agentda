@@ -4,15 +4,18 @@ This file is my standing request list. I rewrite it whenever I need something on
 provide — credentials, an account, a decision, a device. If it says "nothing right now,"
 you're not blocking anything.
 
-**Last updated:** 2026-08-12 · **Status:** 2 items, both credentials
+**Last updated:** 2026-08-13 · **Status:** 3 items, all credentials — none urgent
 
 | # | What | Why it's blocked on you | Time |
 |---|---|---|---|
 | 1 | A Telegram bot token | I can't create a bot account on your behalf | ~3 min |
 | 2 | Mailbox credentials (IMAP/SMTP) | I have no mailbox to read | ~5 min |
+| 3 | One API key, if you want (optional) | Verifies the hosted API providers | ~2 min |
 
-Neither is urgent. Everything else in Phase 1 is built and verified; these two close the
-last gaps marked ⏳ in [PLAN.md](PLAN.md).
+None of these block progress — Phase 1 and most of Phase 2 are built and verified without
+them. You can work on the desktop app right now with no credentials at all:
+`pnpm daemon` prints a URL, and bots run on your Claude subscription, your ChatGPT plan, or
+a local Ollama model.
 
 ---
 
@@ -132,6 +135,28 @@ otherwise I'll verify that sending is correctly *blocked* and leave it there.
 
 ---
 
+## 3. One API key (optional)
+
+**What this unlocks:** proof that the hosted API providers work. Agentda's agent loop and
+its approval gate are verified end to end against a local Ollama model — approved tool calls
+execute and land in the audit log, denied ones never touch disk. The Anthropic, OpenAI, xAI,
+and Gemini clients are written to each vendor's documented request shape and unit-tested,
+but none has been run against a real key, because there are none on this machine.
+
+Any *one* key proves the shape works; the others follow the same pattern. Add whichever you
+already have to `.env.local`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+# or OPENAI_API_KEY=sk-...  /  XAI_API_KEY=xai-...  /  GEMINI_API_KEY=...
+```
+
+Then tell me and I'll run one cheap turn through it, confirm tool calls pass the gate, and
+update the provider matrix from "unverified" to "verified".
+
+Skip this happily if you'd rather not spend anything: subscription and local providers cover
+the product's actual pitch, and the API adapters exist mainly as the policy hedge.
+
 ## What I'll never do with these
 
 - Print them in chat, commit them, or copy them anywhere outside `.env.local`.
@@ -139,13 +164,12 @@ otherwise I'll verify that sending is correctly *blocked* and leave it there.
 - Touch a mailbox folder other than reading INBOX during verification.
 
 To revoke at any time: BotFather `/revoke` for the Telegram token, your provider's app
-password page for the mailbox. Then delete `.env.local`.
+password page for the mailbox, the vendor's console for an API key. Then delete `.env.local`.
 
 ---
 
-## If you'd rather not do either right now
+## If you'd rather not do any of these
 
-Fine — say so and I'll mark both as permanently deferred in [PLAN.md](PLAN.md) and move to
-Phase 2 (the Codex adapter on ChatGPT-plan auth, API-key providers, voice, and the desktop
-app). Nothing in Phase 2 depends on these; the Telegram and email paths would just stay
-"built but unverified against the real service," stated plainly rather than quietly.
+That's genuinely fine and nothing stalls. The affected paths stay marked ⏳ in
+[PLAN.md](PLAN.md) — "built but unverified against the real service", stated plainly rather
+than quietly. Phase 3 (Slack, Discord, tool packs) doesn't depend on any of them either.

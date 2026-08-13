@@ -45,8 +45,11 @@ const queue = new ApprovalQueue(db, {
   ask: (req) => {
     openApprovals.set(req.id, req)
     api?.emit('approval', { id: req.id, bot: req.bot, tool: req.tool, input: req.input, reason: req.reason })
-    const chat = req.chat ?? chatFor.get(req.bot)
-    if (chat) void bridge?.ask(req, chat)
+    // Only real Telegram chat ids go to Telegram. A desktop turn carries
+    // `desktop:<bot>`, and sending to that id makes the API reject and, being
+    // unawaited, take the daemon down with it.
+    const chat = isTelegramChat(req.chat) ? req.chat : chatFor.get(req.bot)
+    if (chat) void bridge?.ask(req, chat).catch((e) => console.warn(`telegram ask failed: ${e.message}`))
   },
   onResolved: (req, r) => {
     openApprovals.delete(req.id)
@@ -84,6 +87,7 @@ const runner = new TurnRunner({
   queue,
   hook,
   adapters: buildAdapters(),
+  isPaused: () => paused,
   settingsPath,
   codexShim: hook.shimPath(join(home, 'run'), 'codex'),
   guardrails: { perWindow: Number(process.env.AGENTDA_TURNS_PER_WINDOW ?? 60) },
@@ -265,6 +269,8 @@ const scheduler = new Scheduler(
     if (body) await bridge?.bot.api.sendMessage(chat, `[${persona.id}] ${body}`.slice(0, 4000))
   },
 )
+
+const isTelegramChat = (chat: string | null | undefined): chat is string => !!chat && /^-?\d+$/.test(chat)
 
 function lastKnownChat(): string | undefined {
   return chatFor.values().next().value

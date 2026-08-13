@@ -30,12 +30,36 @@ export class ControlApi {
   private server: Server
   private port = 0
   private listeners = new Set<(event: string, data: unknown) => void>()
+  // Open SSE responses, so shutdown can end them: server.close() waits for
+  // active connections, and an event stream never ends on its own.
+  private streams = new Set<import('node:http').ServerResponse>()
 
   constructor(private deps: ApiDeps) {
-    this.server = createServer(async (req, res) => {
+    this.server = createServer((req, res) => void this.handle(req, res).catch((err) => {
+      // A thrown handler must answer the request and leave the daemon standing.
+      try {
+        if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: (err as Error).message }))
+      } catch {
+        // client already gone
+      }
+    }))
+  }
+
+  private async handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
+    {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
       const json = (code: number, body: unknown) =>
         res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(body))
+
+      // Only loopback names may talk to us. Without this a page on the open
+      // internet could DNS-rebind to 127.0.0.1, read the token off `/`, and
+      // then answer approvals — the gate's own server avoids this with a random
+      // port plus a path secret, and this one needs the equivalent.
+      const host = (req.headers.host ?? '').split(':')[0]
+      if (host && !['127.0.0.1', 'localhost', '[::1]', '::1'].includes(host)) {
+        return void json(403, { error: 'loopback only' })
+      }
 
       // The UI itself is unauthenticated (it is just markup); every data route
       // is not. The token rides in the URL for the initial page load so the
@@ -43,16 +67,19 @@ export class ControlApi {
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         try {
           const html = readFileSync(join(UI_DIR, 'index.html'), 'utf8').replace('__AGENTDA_TOKEN__', this.token)
-          return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html)
+          return void res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html)
         } catch {
-          return res.writeHead(404).end('desktop UI not found')
+          return void res.writeHead(404).end('desktop UI not found')
         }
       }
 
-      if (req.headers.authorization !== `Bearer ${this.token}`) return json(401, { error: 'unauthorized' })
+      // EventSource cannot set headers, so the stream authenticates by query
+      // param. Same secret either way.
+      const presented = req.headers.authorization?.replace(/^Bearer /, '') ?? url.searchParams.get('token')
+      if (presented !== this.token) return void json(401, { error: 'unauthorized' })
 
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(200, {
+        return void json(200, {
           paused: this.deps.isPaused(),
           bots: this.deps.personas().map((p) => ({
             id: p.id,
@@ -67,12 +94,15 @@ export class ControlApi {
       }
 
       if (req.method === 'GET' && url.pathname === '/api/audit') {
-        const limit = Math.min(Number(url.searchParams.get('limit') ?? 100), 1000)
+        const asked = Number(url.searchParams.get('limit') ?? 100)
+        // A non-numeric or negative limit must not reach SQLite: it throws a
+        // datatype mismatch that would otherwise take the daemon down.
+        const limit = Number.isFinite(asked) ? Math.min(Math.max(Math.trunc(asked), 1), 1000) : 100
         const bot = url.searchParams.get('bot')
         const rows = bot
           ? this.deps.db.prepare('SELECT * FROM audit_log WHERE bot = ? ORDER BY id DESC LIMIT ?').all(bot, limit)
           : this.deps.db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?').all(limit)
-        return json(200, { rows })
+        return void json(200, { rows })
       }
 
       if (req.method === 'POST') {
@@ -82,19 +112,19 @@ export class ControlApi {
             decision: body.decision === 'allow' ? 'allow' : 'deny',
             source: 'human-tap',
           })
-          return json(200, { settled: ok })
+          return void json(200, { settled: ok })
         }
         if (url.pathname === '/api/mode') {
           this.deps.setMode(body.bot, body.mode === 'auto' ? 'auto' : 'ask')
-          return json(200, { ok: true })
+          return void json(200, { ok: true })
         }
         if (url.pathname === '/api/pause') {
           this.deps.pause(!!body.on)
-          return json(200, { paused: this.deps.isPaused() })
+          return void json(200, { paused: this.deps.isPaused() })
         }
         if (url.pathname === '/api/send') {
           this.deps.send(body.bot, String(body.text ?? ''))
-          return json(202, { accepted: true })
+          return void json(202, { accepted: true })
         }
       }
 
@@ -106,12 +136,16 @@ export class ControlApi {
         res.write(': connected\n\n') // flush headers so the client knows it is live
         const push = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
         this.listeners.add(push)
-        req.on('close', () => this.listeners.delete(push))
+        this.streams.add(res)
+        req.on('close', () => {
+          this.listeners.delete(push)
+          this.streams.delete(res)
+        })
         return
       }
 
       json(404, { error: 'not found' })
-    })
+    }
   }
 
   emit(event: string, data: unknown): void {
@@ -125,9 +159,18 @@ export class ControlApi {
   }
 
   async listen(preferred = Number(process.env.AGENTDA_API_PORT ?? 4599)): Promise<number> {
+    // If the preferred port is taken (another daemon, or anything else), take
+    // any free one rather than refusing to start.
     await new Promise<void>((resolve, reject) => {
-      this.server.once('error', reject)
-      this.server.listen(preferred, '127.0.0.1', resolve)
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code !== 'EADDRINUSE') return reject(err)
+        this.server.listen(0, '127.0.0.1', resolve)
+      }
+      this.server.once('error', onError)
+      this.server.listen(preferred, '127.0.0.1', () => {
+        this.server.off('error', onError)
+        resolve()
+      })
     })
     this.port = (this.server.address() as { port: number }).port
     return this.port
@@ -138,6 +181,8 @@ export class ControlApi {
   }
 
   close(): Promise<void> {
+    for (const s of this.streams) s.end()
+    this.streams.clear()
     return new Promise((resolve) => this.server.close(() => resolve()))
   }
 }

@@ -12,7 +12,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "daemon": "node --env-file-if-exists=.env.local node_modules/tsx/dist/cli.mjs apps/daemon/src/index.ts",
-    "test:live": "node --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run"
+    "test:live": "node --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run --no-file-parallelism"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

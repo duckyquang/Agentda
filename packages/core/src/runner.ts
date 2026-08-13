@@ -42,6 +42,9 @@ export class TurnRunner {
       guardrails?: Guardrails
       settingsPath: string
       codexShim?: string
+      // The global pause switch: an AUTO bot must stop auto-approving the
+      // moment the owner pauses, on every provider.
+      isPaused?: () => boolean
       // How to launch Agentda's own MCP servers for a bot. Injected so core
       // stays free of assumptions about where the packages live.
       mcpEntries?: (p: Persona) => Record<string, { command: string; args: string[]; env?: Record<string, string> }>
@@ -127,7 +130,13 @@ export class TurnRunner {
         // API providers run our own loop, so the gate is a plain call — no
         // hook, no shim, no race.
         gate: async (tool: string, toolInput: unknown) =>
-          (await this.deps.queue.request({ bot: persona.id, chat, tool, input: toolInput }, persona.policy)).decision,
+          (
+            await this.deps.queue.request(
+              { bot: persona.id, chat, tool, input: toolInput },
+              persona.policy,
+              this.deps.isPaused?.() ?? false,
+            )
+          ).decision,
       })) {
         opts.onEvent?.(ev)
         if (ev.type === 'text') text.push(ev.text)

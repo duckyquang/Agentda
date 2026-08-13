@@ -1,3 +1,4 @@
+import { request } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -107,6 +108,56 @@ describe('control API', () => {
     await expect(pending).resolves.toMatchObject({ decision: 'allow', source: 'human-tap' })
     await api2.close()
     await s.api.close()
+  })
+
+  it('lets EventSource authenticate by query param, since it cannot set headers', async () => {
+    const s = await serve()
+    // Without this the browser's stream 401s and every reply is lost — the UI
+    // looks alive and silently never updates.
+    const res = await fetch(s.url(`/api/events?token=${s.api.token}`))
+    expect(res.status).toBe(200)
+    await res.body!.cancel()
+    expect((await fetch(s.url('/api/events?token=wrong'))).status).toBe(401)
+    await s.api.close()
+  })
+
+  it('refuses a non-loopback Host, so a rebinding page cannot read the token', async () => {
+    const s = await serve()
+    const port = Number(new URL(s.url('/')).port)
+    // fetch forbids setting Host, so this needs a raw request.
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = request(
+        { host: '127.0.0.1', port, path: '/api/state', headers: { host: 'evil.example.com', ...s.auth } },
+        (res) => {
+          res.resume()
+          resolve(res.statusCode ?? 0)
+        },
+      )
+      req.on('error', reject)
+      req.end()
+    })
+    expect(status).toBe(403)
+    await s.api.close()
+  })
+
+  it('survives a nonsense audit limit instead of taking the daemon down', async () => {
+    const s = await serve()
+    for (const q of ['abc', '-1', '999999']) {
+      const res = await fetch(s.url(`/api/audit?limit=${q}`), { headers: s.auth })
+      expect(res.status).toBe(200)
+      expect((await res.json()).rows).toEqual([])
+    }
+    await s.api.close()
+  })
+
+  it('close() returns even with an open event stream', async () => {
+    const s = await serve()
+    const res = await fetch(s.url(`/api/events?token=${s.api.token}`))
+    void res.body!.getReader().read()
+    // server.close() waits on active connections and an SSE response never
+    // ends on its own, so shutdown must end the streams itself.
+    await expect(Promise.race([s.api.close(), new Promise((_, r) => setTimeout(() => r(new Error('hung')), 3000))]))
+      .resolves.toBeUndefined()
   })
 
   it('streams events to a connected client', async () => {

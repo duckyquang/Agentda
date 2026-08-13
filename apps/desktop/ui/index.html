@@ -142,9 +142,13 @@ async function renderAudit(bot) {
 }
 
 async function decide(id, decision) {
-  await api('/api/approve', { method: 'POST', body: JSON.stringify({ id, decision }) })
+  const r = await api('/api/approve', { method: 'POST', body: JSON.stringify({ id, decision }) })
   state.pending = state.pending.filter((p) => p.id !== id)
-  push(current, 'sys', `you ${decision === 'allow' ? 'approved' : 'denied'} it`)
+  // A request that already timed out cannot be approved after the fact; saying
+  // otherwise would tell the user the opposite of what happened.
+  push(current, 'sys', r.settled
+    ? `you ${decision === 'allow' ? 'approved' : 'denied'} it`
+    : 'too late — that request had already expired (denied)')
   render()
 }
 

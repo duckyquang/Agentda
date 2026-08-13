@@ -18,6 +18,7 @@ import {
 import { ClaudeAdapter } from '@agentda/provider-claude'
 import { CodexAdapter } from '@agentda/provider-codex'
 import { AnthropicClient, ApiAdapter, GeminiClient, OpenAICompatClient } from '@agentda/provider-api'
+import { ControlApi } from './api'
 import { createBridge } from './telegram'
 
 const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
@@ -36,14 +37,21 @@ if (!personas.length) {
 let paused = false
 const chatFor = new Map<string, string>() // botId -> last chat, so approvals reach the right thread
 
+// Open approvals, so a desktop client that connects mid-wait still sees them.
+const openApprovals = new Map<string, any>()
+
 const queue = new ApprovalQueue(db, {
   timeoutMs: Number(process.env.AGENTDA_APPROVAL_TIMEOUT_MS ?? 30 * 60_000),
   ask: (req) => {
+    openApprovals.set(req.id, req)
+    api?.emit('approval', { id: req.id, bot: req.bot, tool: req.tool, input: req.input, reason: req.reason })
     const chat = req.chat ?? chatFor.get(req.bot)
-    if (chat) void bridge.ask(req, chat)
+    if (chat) void bridge?.ask(req, chat)
   },
   onResolved: (req, r) => {
-    if (r.source !== 'human-tap') void bridge.closeCard(req.id, `${r.decision} (${r.source})`)
+    openApprovals.delete(req.id)
+    api?.emit('resolved', { id: req.id, decision: r.decision, source: r.source })
+    if (r.source !== 'human-tap') void bridge?.closeCard(req.id, `${r.decision} (${r.source})`)
   },
 })
 
@@ -140,13 +148,56 @@ function buildAdapters(): Map<string, any> {
   return m
 }
 
+const api = new ControlApi({
+  db,
+  queue,
+  personas: () => personas,
+  pending: () => [...openApprovals.values()],
+  setMode: (botId, mode) => {
+    const p = personas.find((x) => x.id === botId)
+    if (p) setPersonaMode(p, mode)
+  },
+  pause: (on) => {
+    paused = on
+    if (on) queue.denyAll('paused by the owner')
+  },
+  isPaused: () => paused,
+  send: (botId, text) => {
+    const p = personas.find((x) => x.id === botId)
+    if (!p) return api.emit('message-out', { bot: botId, text: `no bot named ${botId}` })
+    // Deliberately not awaited: the turn may pause on an approval for as long
+    // as the human takes, and the UI shows that card meanwhile.
+    void runner
+      .run(p, `desktop:${botId}`, text, {
+        onEvent: (e) => {
+          if (e.type === 'result') sessionOwner.set(e.sessionId, p.id)
+        },
+      })
+      .then((res) => {
+        const body = [
+          ...(res.notices ?? []),
+          res.skipped ? `(skipped: ${res.skipped})` : '',
+          res.error ? `${res.error.kind}: ${res.error.hint ?? res.error.message}` : res.text,
+          res.memoryNotice ?? '',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+        api.emit('message-out', { bot: p.id, text: body || '(no reply)' })
+      })
+      .catch((err) => api.emit('message-out', { bot: p.id, text: `error: ${(err as Error).message}` }))
+  },
+})
+await api.listen()
+console.log(`desktop UI at ${api.url()}`)
+
+// Telegram is optional: without a token the daemon still serves the desktop
+// app, which is the whole point of not coupling them.
 const token = process.env.TELEGRAM_BOT_TOKEN
 if (!token) {
-  console.error('TELEGRAM_BOT_TOKEN is not set — get one from @BotFather')
-  process.exit(1)
+  console.log('TELEGRAM_BOT_TOKEN not set — running desktop-only (get a token from @BotFather to add chat)')
 }
 
-const bridge = createBridge({
+const bridge = token ? createBridge({
   token,
   owners,
   queue,
@@ -201,7 +252,7 @@ const bridge = createBridge({
     }
     return reply('commands: /bots /mode <bot> ask|auto /pause /resume /audit /routines /reload')
   },
-})
+}) : undefined
 
 const scheduler = new Scheduler(
   db,
@@ -211,7 +262,7 @@ const scheduler = new Scheduler(
     if (!chat) return
     const res = await runner.run(persona, chat, prompt, { scheduled: true })
     const body = res.skipped ? `(routine skipped: ${res.skipped})` : res.error ? `routine error: ${res.error.message}` : res.text
-    if (body) await bridge.bot.api.sendMessage(chat, `[${persona.id}] ${body}`.slice(0, 4000))
+    if (body) await bridge?.bot.api.sendMessage(chat, `[${persona.id}] ${body}`.slice(0, 4000))
   },
 )
 
@@ -263,7 +314,7 @@ function stripAddress(text: string, p: Persona): string {
   return text.replace(new RegExp(`(^|\\s)@?${p.id}\\b[:,]?`, 'i'), ' ').trim() || text
 }
 
-if (owners.count('telegram') === 0) {
+if (token && owners.count('telegram') === 0) {
   const code = owners.mintCode('telegram')
   console.log(`\nPAIRING CODE: ${code}\nDM this code to your bot on Telegram to claim it. Until then it answers nobody.\n`)
 }
@@ -275,8 +326,9 @@ const shutdown = async (code = 0) => {
   console.log('\nshutting down…')
   scheduler.stop()
   queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
-  await bridge.bot.stop().catch(() => {})
+  await bridge?.bot.stop().catch(() => {})
   await hook.close().catch(() => {})
+  await api.close().catch(() => {})
   db.close()
   process.exit(code)
 }
@@ -288,7 +340,12 @@ process.on('SIGTERM', () => void shutdown())
 
 scheduler.start()
 try {
-  await bridge.bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`bridge live as @${me.username}`) })
+  if (bridge) {
+    await bridge.bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`bridge live as @${me.username}`) })
+  } else {
+    // Desktop-only: nothing to poll, so just stay up until a signal.
+    await new Promise(() => {})
+  }
 } catch (err) {
   const e = err as { error_code?: number; message: string }
   console.error(

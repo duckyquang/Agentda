@@ -1,0 +1,125 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ApprovalQueue, defaultPolicy, openDb, type Persona } from '@agentda/core'
+import { afterAll, describe, expect, it } from 'vitest'
+import { ControlApi } from '../src/api'
+
+const dir = mkdtempSync(join(tmpdir(), 'agentda-api-'))
+afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+const persona = (id: string): Persona => ({
+  id,
+  dir: join(dir, id),
+  name: id,
+  prompt: '',
+  provider: 'claude',
+  providers: [{ provider: 'claude' }],
+  allowMeteredFailover: false,
+  policy: defaultPolicy(),
+  tools: [],
+  agentdaTools: true,
+  browser: false,
+  email: false,
+  browserSurface: 'shadow',
+  scope: [],
+  routines: [],
+})
+
+let n = 0
+async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> = {}) {
+  const db = openDb(join(dir, `api${n++}.db`))
+  const queue = new ApprovalQueue(db, {})
+  const sent: { bot: string; text: string }[] = []
+  const api = new ControlApi({
+    db,
+    queue,
+    personas: () => [persona('chief')],
+    pending: () => [],
+    send: (bot, text) => void sent.push({ bot, text }),
+    setMode: () => {},
+    pause: () => {},
+    isPaused: () => false,
+    ...over,
+  })
+  const port = await api.listen(0)
+  const url = (p: string) => `http://127.0.0.1:${port}${p}`
+  const auth = { authorization: `Bearer ${api.token}`, 'content-type': 'application/json' }
+  return { api, db, queue, sent, url, auth }
+}
+
+describe('control API', () => {
+  it('refuses every data route without the token — anything on the box could ask otherwise', async () => {
+    const s = await serve()
+    for (const path of ['/api/state', '/api/audit']) {
+      expect((await fetch(s.url(path))).status).toBe(401)
+    }
+    expect((await fetch(s.url('/api/send'), { method: 'POST', body: '{}' })).status).toBe(401)
+    // A wrong token is no better than none.
+    expect((await fetch(s.url('/api/state'), { headers: { authorization: 'Bearer nope' } })).status).toBe(401)
+    await s.api.close()
+  })
+
+  it('serves state with the token', async () => {
+    const s = await serve()
+    const body = await (await fetch(s.url('/api/state'), { headers: s.auth })).json()
+    expect(body.bots[0]).toMatchObject({ id: 'chief', mode: 'ask' })
+    await s.api.close()
+  })
+
+  it('accepts a send immediately rather than holding the request while a bot thinks', async () => {
+    const s = await serve()
+    const res = await fetch(s.url('/api/send'), {
+      method: 'POST',
+      headers: s.auth,
+      body: JSON.stringify({ bot: 'chief', text: 'hello' }),
+    })
+    // 202: a turn can pause on an approval for as long as the human takes, so
+    // the reply comes back on the event stream instead.
+    expect(res.status).toBe(202)
+    expect(s.sent).toEqual([{ bot: 'chief', text: 'hello' }])
+    await s.api.close()
+  })
+
+  it('an approval tap from the desktop settles the same queue as Telegram', async () => {
+    const s = await serve()
+    let id = ''
+    const q = new ApprovalQueue(s.db, { ask: (r) => void (id = r.id) })
+    const api2 = new ControlApi({
+      db: s.db,
+      queue: q,
+      personas: () => [persona('chief')],
+      pending: () => [],
+      send: () => {},
+      setMode: () => {},
+      pause: () => {},
+      isPaused: () => false,
+    })
+    const port = await api2.listen(0)
+    const pending = q.request({ bot: 'chief', tool: 'mcp__x__send', input: {} }, { ...defaultPolicy(), grants: ['*'] })
+    await new Promise((r) => setImmediate(r))
+
+    await fetch(`http://127.0.0.1:${port}/api/approve`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${api2.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id, decision: 'allow' }),
+    })
+    await expect(pending).resolves.toMatchObject({ decision: 'allow', source: 'human-tap' })
+    await api2.close()
+    await s.api.close()
+  })
+
+  it('streams events to a connected client', async () => {
+    const s = await serve()
+    const res = await fetch(s.url('/api/events'), { headers: s.auth })
+    const reader = res.body!.getReader()
+    const dec = new TextDecoder()
+    expect(dec.decode((await reader.read()).value)).toContain(': connected') // stream is live
+    s.api.emit('approval', { id: 'x1', bot: 'chief', tool: 'mcp__x__send' })
+    const chunk = dec.decode((await reader.read()).value)
+    expect(chunk).toContain('event: approval')
+    expect(chunk).toContain('"id":"x1"')
+    await reader.cancel()
+    await s.api.close()
+  })
+})

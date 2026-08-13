@@ -38,6 +38,7 @@ export class TurnRunner {
       adapters: Map<string, ProviderAdapter>
       guardrails?: Guardrails
       settingsPath: string
+      codexShim?: string
       // How to launch Agentda's own MCP servers for a bot. Injected so core
       // stays free of assumptions about where the packages live.
       mcpEntries?: (p: Persona) => Record<string, { command: string; args: string[]; env?: Record<string, string> }>
@@ -83,6 +84,11 @@ export class TurnRunner {
         mcpConfig,
         settings: this.deps.settingsPath,
         appendSystemPromptFile: systemFile,
+        // Codex takes its gate as a command path and its persona inline, since
+        // it has no --append-system-prompt-file (ADR 0003).
+        hookCommand: this.deps.codexShim,
+        systemPromptFile: systemFile,
+        cwd: persona.dir,
       })) {
         opts.onEvent?.(ev)
         if (ev.type === 'text') text.push(ev.text)
@@ -136,6 +142,15 @@ function personalGuardrails(p: Persona): Guardrails {
 // a bot that doesn't think to search will flatly claim it has no memory. Naming
 // the tools up front makes discovery reliable instead of a coin flip.
 function toolBriefing(p: Persona, mcpConfig: string | undefined): string {
+  // Codex bots are read-only and get no MCP tools (ADR 0003): tell the model
+  // plainly rather than letting it discover the hard way.
+  if (p.provider === 'codex') {
+    return [
+      '# Your tools',
+      'You have no tools on this provider: you can read your memory (included below) and reason, but you cannot write files, send mail, or browse.',
+      'If a task needs any of those, say which capability is missing and stop — do not improvise around it.',
+    ].join('\n')
+  }
   if (!mcpConfig) return ''
   const lines = ['# Your tools', 'These are provided by MCP servers and load on demand — call ToolSearch to load one before first use. Never claim a listed tool does not exist; search for it.']
   if (p.agentdaTools) {

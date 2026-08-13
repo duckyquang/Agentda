@@ -27,10 +27,14 @@ export class HookServer {
     private secret: string,
   ) {
     this.server = createServer((req, res) => {
-      if (req.url !== `/hook/${this.secret}` || req.method !== 'POST') {
+      // The path carries which provider is asking, because they disagree about
+      // how to say yes (see below).
+      const match = req.url?.match(new RegExp(`^/hook/${this.secret}/(claude|codex)$`))
+      if (!match || req.method !== 'POST') {
         res.writeHead(404).end()
         return
       }
+      const provider = match[1] as 'claude' | 'codex'
       let body = ''
       req.on('data', (c) => {
         if (body.length < 1_000_000) body += c
@@ -49,6 +53,17 @@ export class HookServer {
         } catch (err) {
           // Fail closed: if the gate itself breaks, the tool does not run.
           verdict = { decision: 'deny', reason: `agentda gate error: ${(err as Error).message}` }
+        }
+        // Codex rejects permissionDecision:"allow" as unsupported: there,
+        // approval is expressed by saying nothing and letting the call proceed.
+        // Claude wants the explicit allow. Same decision, two dialects.
+        // On Codex an approval is expressed as silence, but "silence" is also
+        // what a failed shim produces — so the server answers with an explicit
+        // ALLOW marker and the shim turns that into silence. Anything else,
+        // including a dead server or a broken curl, stays a deny.
+        if (provider === 'codex' && verdict.decision === 'allow') {
+          res.writeHead(200, { 'content-type': 'text/plain' }).end('AGENTDA_ALLOW')
+          return
         }
         res.writeHead(200, { 'content-type': 'application/json' }).end(
           JSON.stringify({
@@ -76,16 +91,65 @@ export class HookServer {
   // Writes the hook shim + a settings file for --settings. Timeout must exceed
   // the approval window or the CLI would cancel the hook out from under the
   // human, silently turning "waiting for you" into a failure.
-  writeSettings(dir?: string): string {
+  // Returns the settings path Claude Code loads with --settings. The shim it
+  // writes is also what Codex needs (as a bare command path), so both providers
+  // are served from one call — see shimPath().
+  writeSettings(dir?: string, provider: 'claude' | 'codex' = 'claude'): string {
     const d = dir ?? mkdtempSync(join(tmpdir(), 'agentda-hook-'))
     mkdirSync(d, { recursive: true }) // callers pass a path that may not exist yet
-    const shim = join(d, 'gate.sh')
+    const shim = join(d, `gate-${provider}.sh`)
+    const client = join(d, `gate-${provider}.mjs`)
     const timeoutSec = Math.ceil(this.queue.timeoutMs / 1000) + 30
+    const url = `http://127.0.0.1:${this.port}/hook/${this.secret}/${provider}`
+
+    // The client is Node rather than curl. Node is guaranteed present (the
+    // daemon runs on it) and behaves identically everywhere, whereas curl's
+    // handling of a piped body varied enough to hang a turn during testing.
+    //
+    // FAIL CLOSED: a hook that prints nothing reads as "proceed" to both CLIs,
+    // so every failure path — unreachable gate, timeout, malformed reply —
+    // prints a deny instead. Learned the hard way: one run where the shim came
+    // back empty executed a tool that never reached the queue and never hit the
+    // audit log, which is exactly the hole this product exists to close.
     writeFileSync(
-      shim,
-      `#!/bin/sh\nexec curl -sS --max-time ${timeoutSec} -X POST --data-binary @- http://127.0.0.1:${this.port}/hook/${this.secret}\n`,
-      { mode: 0o700 },
+      client,
+      `const DENY = ${JSON.stringify(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: 'agentda gate unreachable — denied rather than run ungated',
+          },
+        }),
+      )}
+let body = ''
+process.stdin.on('data', (c) => (body += c))
+process.stdin.on('end', async () => {
+  try {
+    const ctl = new AbortController()
+    const t = setTimeout(() => ctl.abort(), ${timeoutSec * 1000})
+    const res = await fetch(${JSON.stringify(url)}, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal: ctl.signal,
+    })
+    clearTimeout(t)
+    const text = await res.text()
+    if (!res.ok || !text) return process.stdout.write(DENY)
+    ${provider === 'codex' ? "if (text === 'AGENTDA_ALLOW') return // approval is silence on codex" : ''}
+    process.stdout.write(text)
+  } catch {
+    process.stdout.write(DENY)
+  }
+})
+`,
+      { mode: 0o600 },
     )
+    writeFileSync(shim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(client)}\n`, {
+      mode: 0o700,
+    })
+
     const settings = join(d, 'settings.json')
     writeFileSync(
       settings,
@@ -95,5 +159,11 @@ export class HookServer {
       { mode: 0o600 },
     )
     return settings
+  }
+
+  // Codex takes the hook as a command path rather than a settings file.
+  shimPath(dir: string, provider: 'claude' | 'codex' = 'codex'): string {
+    this.writeSettings(dir, provider)
+    return join(dir, `gate-${provider}.sh`)
   }
 }

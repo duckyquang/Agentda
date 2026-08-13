@@ -16,6 +16,7 @@ import {
   TurnRunner,
 } from '@agentda/core'
 import { ClaudeAdapter } from '@agentda/provider-claude'
+import { CodexAdapter } from '@agentda/provider-codex'
 import { createBridge } from './telegram'
 
 const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
@@ -73,8 +74,12 @@ const runner = new TurnRunner({
   sessions,
   queue,
   hook,
-  adapters: new Map([['claude', new ClaudeAdapter()]]),
+  adapters: new Map<string, any>([
+    ['claude', new ClaudeAdapter()],
+    ['codex', new CodexAdapter()],
+  ]),
   settingsPath,
+  codexShim: hook.shimPath(join(home, 'run'), 'codex'),
   guardrails: { perWindow: Number(process.env.AGENTDA_TURNS_PER_WINDOW ?? 60) },
   mcpEntries: (p) => ({
     ...(p.agentdaTools && {

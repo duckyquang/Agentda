@@ -38,6 +38,9 @@ importers:
       '@agentda/provider-claude':
         specifier: workspace:*
         version: link:../../packages/provider-claude
+      '@agentda/provider-codex':
+        specifier: workspace:*
+        version: link:../../packages/provider-codex
       grammy:
         specifier: ^1.32.0
         version: 1.45.1
@@ -116,6 +119,16 @@ importers:
       '@agentda/core':
         specifier: workspace:*
         version: link:../core
+
+  packages/provider-codex:
+    dependencies:
+      '@agentda/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)
 
 packages:
 

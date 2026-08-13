@@ -16,6 +16,13 @@ export {
 export { TurnRunner, type TurnResult } from './runner'
 export { Scheduler } from './scheduler'
 export { Owners } from './owners'
+export {
+  failoverNotice,
+  type FailoverStep,
+  nextProvider,
+  type ProviderChoice,
+  shouldFailover,
+} from './failover'
 export { DEFAULT_HANDOFF_CAP, type Handoff, handoffCount, recordHandoff, tryHandoff } from './handoff'
 
 // Normalized events every provider adapter emits. Kept exactly as big as the

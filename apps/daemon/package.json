@@ -6,7 +6,8 @@
     "@agentda/core": "workspace:*",
     "@agentda/provider-claude": "workspace:*",
     "grammy": "^1.32.0",
-    "@agentda/provider-codex": "workspace:*"
+    "@agentda/provider-codex": "workspace:*",
+    "@agentda/provider-api": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^2.1.0"

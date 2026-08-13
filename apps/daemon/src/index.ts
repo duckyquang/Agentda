@@ -17,6 +17,7 @@ import {
 } from '@agentda/core'
 import { ClaudeAdapter } from '@agentda/provider-claude'
 import { CodexAdapter } from '@agentda/provider-codex'
+import { AnthropicClient, ApiAdapter, GeminiClient, OpenAICompatClient } from '@agentda/provider-api'
 import { createBridge } from './telegram'
 
 const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
@@ -74,10 +75,7 @@ const runner = new TurnRunner({
   sessions,
   queue,
   hook,
-  adapters: new Map<string, any>([
-    ['claude', new ClaudeAdapter()],
-    ['codex', new CodexAdapter()],
-  ]),
+  adapters: buildAdapters(),
   settingsPath,
   codexShim: hook.shimPath(join(home, 'run'), 'codex'),
   guardrails: { perWindow: Number(process.env.AGENTDA_TURNS_PER_WINDOW ?? 60) },
@@ -112,6 +110,35 @@ const runner = new TurnRunner({
     }),
   }),
 })
+
+// API providers register only when their key is present, so a bot naming one
+// it cannot reach fails with "no adapter" rather than a confusing auth error.
+function buildAdapters(): Map<string, any> {
+  const m = new Map<string, any>([
+    ['claude', new ClaudeAdapter()],
+    ['codex', new CodexAdapter()],
+  ])
+  const model = (fallback: string) => process.env.AGENTDA_API_MODEL ?? fallback
+  if (process.env.ANTHROPIC_API_KEY) {
+    m.set('anthropic-api', new ApiAdapter(new AnthropicClient({ apiKey: process.env.ANTHROPIC_API_KEY, model: model('claude-sonnet-5') }), 'anthropic-api'))
+  }
+  if (process.env.OPENAI_API_KEY) {
+    m.set('openai-api', new ApiAdapter(new OpenAICompatClient('openai-api', { baseUrl: 'https://api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY, model: model('gpt-5.2') }), 'openai-api'))
+  }
+  if (process.env.XAI_API_KEY) {
+    m.set('xai-api', new ApiAdapter(new OpenAICompatClient('xai-api', { baseUrl: 'https://api.x.ai/v1', apiKey: process.env.XAI_API_KEY, model: model('grok-4') }), 'xai-api'))
+  }
+  if (process.env.GEMINI_API_KEY) {
+    m.set('gemini-api', new ApiAdapter(new GeminiClient({ apiKey: process.env.GEMINI_API_KEY, model: model('gemini-3-pro') }), 'gemini-api'))
+  }
+  // Local models cost nothing and need no key, so they are always available if
+  // the user points at an Ollama server.
+  m.set('ollama', new ApiAdapter(new OpenAICompatClient('ollama', {
+    baseUrl: process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434/v1',
+    model: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
+  }), 'ollama'))
+  return m
+}
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 if (!token) {
@@ -209,6 +236,7 @@ async function runTurn(
       if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
     },
   })
+  for (const n of res.notices ?? []) await reply(n) // e.g. a provider switch
   if (res.skipped) return reply(`(${persona.id} skipped: ${res.skipped})`)
   if (res.error) return reply(`${persona.id} — ${res.error.kind}: ${res.error.hint ?? res.error.message}`)
   await reply(res.text || '(no reply)')

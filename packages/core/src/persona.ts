@@ -11,7 +11,10 @@ export interface Persona {
   dir: string
   name: string
   prompt: string
-  provider: string
+  provider: string // first choice; providers[] is the full ordered chain
+  providers: { provider: string; metered?: boolean }[]
+  allowMeteredFailover: boolean
+  model?: string // for API providers, which model to call
   policy: BotPolicy
   tools: string[] // built-in tool grants (availability only; the gate still runs)
   agentdaTools: boolean // attach Agentda's own MCP server (memory + scoped files)
@@ -24,6 +27,18 @@ export interface Persona {
   quietHours?: { start: number; end: number } // local hours, [start, end)
   dailyTurnCap?: number
   weeklyTurnCap?: number
+}
+
+// A bot may name one provider or an ordered chain. Metered entries are marked
+// so failover can refuse to spend money without an explicit opt-in (FR-6).
+function normalizeChain(cfg: Record<string, any>): { provider: string; metered?: boolean }[] {
+  const METERED = /^(anthropic|openai|xai|gemini)-api$/
+  const raw = Array.isArray(cfg.providers) && cfg.providers.length ? cfg.providers : [cfg.provider ?? 'claude']
+  return raw.map((entry: any) => {
+    const provider = typeof entry === 'string' ? entry : String(entry.provider)
+    const metered = typeof entry === 'object' && entry.metered !== undefined ? !!entry.metered : METERED.test(provider)
+    return { provider, metered }
+  })
 }
 
 const asStringArray = (v: unknown): string[] =>
@@ -57,7 +72,10 @@ export function loadPersona(dir: string): Persona {
     dir,
     name: String(cfg.name ?? id),
     prompt: existsSync(promptPath) ? readFileSync(promptPath, 'utf8') : '',
-    provider: String(cfg.provider ?? 'claude'),
+    provider: String(Array.isArray(cfg.providers) && cfg.providers.length ? cfg.providers[0].provider ?? cfg.providers[0] : (cfg.provider ?? 'claude')),
+    providers: normalizeChain(cfg),
+    allowMeteredFailover: cfg.allow_metered_failover === true,
+    model: typeof cfg.model === 'string' ? cfg.model : undefined,
     policy: {
       mode,
       // What this bot may touch at all: the built-ins it was given, plus every

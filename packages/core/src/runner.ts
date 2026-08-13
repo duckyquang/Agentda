@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApprovalQueue } from './approvals'
 import { checkBudget, type Guardrails, recordTurn } from './budget'
+import { failoverNotice, nextProvider, shouldFailover } from './failover'
 import type { Db } from './db'
 import type { HookServer } from './hook-server'
 import type { AgentEvent, ProviderAdapter } from './index'
@@ -19,6 +20,8 @@ export interface TurnResult {
   // Memory is how a prompt injection survives past the session that carried it,
   // so those writes are surfaced to the human instead of happening quietly.
   memoryNotice?: string
+  // Things the human should see about the run itself, e.g. a provider switch.
+  notices?: string[]
 }
 
 // Tools whose output is attacker-controllable: anything the bot reads from the
@@ -45,7 +48,38 @@ export class TurnRunner {
     },
   ) {}
 
+  // Walks the bot's provider chain: try each in order, moving on only for the
+  // failures another provider could actually fix (auth, plan limits). Every
+  // switch is announced in the thread, and a metered provider needs opt-in.
   async run(
+    persona: Persona,
+    chat: string,
+    input: string,
+    opts: { scheduled?: boolean; onEvent?: (e: AgentEvent) => void } = {},
+  ): Promise<TurnResult> {
+    let provider = persona.provider
+    const notices: string[] = []
+    for (;;) {
+      const res = await this.runOn(provider, persona, chat, input, opts)
+      if (!res.error || !shouldFailover(res.error.kind as any)) {
+        return notices.length ? { ...res, notices: [...(res.notices ?? []), ...notices] } : res
+      }
+      const step = nextProvider(persona.providers, provider, { allowMetered: persona.allowMeteredFailover })
+      if (!step || step.blockedReason) {
+        return {
+          ...res,
+          notices: [...notices, ...(step?.blockedReason ? [step.blockedReason] : [])],
+        }
+      }
+      notices.push(failoverNotice(provider, step.choice.provider, res.error.kind as any))
+      provider = step.choice.provider
+      // Fresh session on the new provider: sessions are not portable, so the
+      // next attempt is seeded from memory, not resumed (FR-6).
+    }
+  }
+
+  private async runOn(
+    providerName: string,
     persona: Persona,
     chat: string,
     input: string,
@@ -57,8 +91,8 @@ export class TurnRunner {
     const verdict = checkBudget(this.deps.db, persona.id, effective)
     if (!verdict.ok) return { text: '', toolCalls: [], skipped: verdict.reason }
 
-    const adapter = this.deps.adapters.get(persona.provider)
-    if (!adapter) return { text: '', toolCalls: [], error: { kind: 'other', message: `no adapter for ${persona.provider}` } }
+    const adapter = this.deps.adapters.get(providerName)
+    if (!adapter) return { text: '', toolCalls: [], error: { kind: 'other', message: `no adapter for ${providerName}` } }
 
     const runDir = mkdtempSync(join(tmpdir(), 'agentda-run-'))
     const memory = readMemory(persona)
@@ -89,6 +123,11 @@ export class TurnRunner {
         hookCommand: this.deps.codexShim,
         systemPromptFile: systemFile,
         cwd: persona.dir,
+        model: persona.model,
+        // API providers run our own loop, so the gate is a plain call — no
+        // hook, no shim, no race.
+        gate: async (tool: string, toolInput: unknown) =>
+          (await this.deps.queue.request({ bot: persona.id, chat, tool, input: toolInput }, persona.policy)).decision,
       })) {
         opts.onEvent?.(ev)
         if (ev.type === 'text') text.push(ev.text)

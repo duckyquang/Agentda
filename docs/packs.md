@@ -31,8 +31,10 @@ tools the pack forgot to mention, because unlisted means unclassified means gate
 cannot make an action quieter by omission, only louder.
 
 `outbound` is narrower: verbs that send, post, buy, or write to someone else. Those are
-never auto-approved, and they are what makes a pack refuse to attach to a provider whose
-gate does not work.
+never auto-approved *and* they join the bot's always-ask list, so they keep stopping for a
+human even in Auto mode — a pack is a server we do not control, and Auto is not a
+free-for-all. They are also what makes a pack refuse to attach to a provider whose gate does
+not work.
 
 ## Installing one
 

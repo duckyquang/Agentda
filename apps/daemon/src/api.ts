@@ -193,6 +193,9 @@ export class ControlApi {
           jpeg += c
           if (jpeg.length > 4_000_000) return void json(413, { error: 'frame too large' })
         }
+        // The page renders this straight into an <img src>, so it has to be
+        // base64 and nothing else.
+        if (!/^[A-Za-z0-9+/=]*$/.test(jpeg)) return void json(400, { error: 'frame must be base64' })
         this.emit('frame', { bot: previewRoute[1], jpeg })
         // The response carries the control state, so a working browser learns
         // it has been taken over on its next frame without a second request.

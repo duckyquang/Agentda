@@ -246,3 +246,58 @@ describe('persona management over the API', () => {
   })
 })
 
+describe('amendments and preview frames', () => {
+  it('an amendment denies the call and hands the model the instruction', async () => {
+    const s = await serve()
+    const q = new ApprovalQueue(s.db, {})
+    const api2 = new ControlApi({ ...s.deps, queue: q })
+    const port = await api2.listen(0)
+    const pending = q.request({ bot: 'chief', tool: 'mcp__email__email_send', input: {} }, { ...defaultPolicy(), grants: ['*'] })
+    await new Promise((r) => setImmediate(r))
+    const id = q.open()[0].id
+
+    await fetch(`http://127.0.0.1:${port}/api/approve`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${api2.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id, decision: 'amend', instruction: 'cc anna@example.com' }),
+    })
+    const res = await pending
+    expect(res.decision).toBe('deny')
+    expect(res.source).toBe('human-text')
+    expect(res.reason).toContain('cc anna@example.com')
+    await api2.close()
+    await s.api.close()
+  })
+
+  it('refuses a preview frame that is not base64, since the page renders it into an img', async () => {
+    const s = await serve()
+    const post = (body: string) =>
+      fetch(s.url('/api/preview/chief'), { method: 'POST', headers: { authorization: `Bearer ${s.api.token}` }, body })
+    expect((await post('" onerror="alert(1)')).status).toBe(400)
+    expect((await post('/9j/4AAQSkZJRg==')).status).toBe(200)
+    await s.api.close()
+  })
+
+  it('take over and hand back are readable by the browser server that has to obey them', async () => {
+    const s = await serve()
+    const control = (c: string) =>
+      fetch(s.url('/api/preview/chief/control'), { method: 'POST', headers: s.auth, body: JSON.stringify({ control: c }) })
+    const read = async () => (await (await fetch(s.url('/api/preview/chief/control'), { headers: s.auth })).json()).control
+
+    expect(await read()).toBeNull()
+    await control('take-over')
+    expect(await read()).toBe('take-over')
+    // A frame POST answers with the same state, so a working browser learns it
+    // was taken over without a second request.
+    const framed = await fetch(s.url('/api/preview/chief'), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${s.api.token}` },
+      body: '/9j/4AAQ',
+    })
+    expect((await framed.json()).control).toBe('take-over')
+    await control('hand-back')
+    expect(await read()).toBe('hand-back')
+    await s.api.close()
+  })
+})
+

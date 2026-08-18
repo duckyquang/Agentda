@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { defaultPolicy, loadPacks, missingEnv, type Persona, packGrants, refuseOnCodex, withPacks } from '../src/index'
+import { decide, defaultPolicy, loadPacks, missingEnv, type Persona, packGrants, refuseOnCodex, withPacks } from '../src/index'
 
 const packsRoot = () => mkdtempSync(join(tmpdir(), 'agentda-packs-'))
 
@@ -78,6 +78,17 @@ describe('tool packs', () => {
     // reason the classification exists.
     expect(grants.autoApprove).not.toContain('mcp__mailer__send_message')
     expect(grants.outbound).toEqual(['mcp__mailer__send_message'])
+  })
+
+  it('keeps a pack’s outbound verbs asking even in Auto', () => {
+    const root = packsRoot()
+    writePack(root, 'mailer', MAILER)
+    const p = withPacks(persona({ packs: ['mailer'] }), loadPacks(root), { MAILER_TOKEN: 'x' } as NodeJS.ProcessEnv)
+    expect(p.policy.alwaysAsk).toContain('mcp__mailer__send_message')
+    // Auto mode is not a free-for-all: a third-party server's send verb still
+    // stops for a human.
+    expect(decide('mcp__mailer__send_message', { ...p.policy, mode: 'auto' }).kind).toBe('approve')
+    expect(decide('mcp__mailer__list_messages', { ...p.policy, mode: 'auto' }).kind).toBe('allow')
   })
 
   it('expands {scope} to the bot’s own directories', () => {

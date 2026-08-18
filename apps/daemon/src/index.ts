@@ -454,7 +454,6 @@ if (process.env.DISCORD_BOT_TOKEN) {
     checklist: discord.checklist,
     stop: async () => discord.stop(),
   })
-  discord.client.once('clientReady', (c: { user: { tag: string } }) => console.log(`Discord bridge live as ${c.user.tag}`))
   void discord.start().catch((e: Error) => console.error(`Discord bridge failed: ${e.message}`))
 }
 

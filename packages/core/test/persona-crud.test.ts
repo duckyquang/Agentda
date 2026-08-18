@@ -84,4 +84,27 @@ describe('creating and editing a bot from the app', () => {
     expect(src).toContain('model = "c"')
     expect(src).toContain('model_notes = "b"')
   })
+
+  it('drops patch keys it does not recognise instead of writing them out', () => {
+    const bots = botsDir()
+    const p = createPersona(bots, { id: 'chief' })
+    updatePersona(p, { name: 'Chief', ...({ evil: 'x', __proto__: 'y' } as object) })
+    const src = readFileSync(join(bots, 'chief', 'bot.toml'), 'utf8')
+    expect(src).toContain('name = "Chief"')
+    expect(src).not.toContain('evil')
+    expect(src).not.toContain('undefined')
+  })
+
+  it('refuses a value TOML cannot hold, and changes nothing when it does', () => {
+    const bots = botsDir()
+    const p = createPersona(bots, { id: 'chief' })
+    const before = readFileSync(join(bots, 'chief', 'bot.toml'), 'utf8')
+    // NaN spells something else in TOML; writing it would leave the file
+    // unparseable and the bot would vanish on the next reload.
+    expect(() => updatePersona(p, { dailyTurnCap: Number.NaN, prompt: 'changed' })).toThrow()
+    expect(readFileSync(join(bots, 'chief', 'bot.toml'), 'utf8')).toBe(before)
+    expect(readFileSync(join(bots, 'chief', 'prompt.md'), 'utf8')).not.toBe('changed')
+    expect(loadPersona(join(bots, 'chief')).id).toBe('chief')
+  })
 })
+

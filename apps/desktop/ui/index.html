@@ -189,11 +189,14 @@ function wireCards() {
 }
 
 async function decide(id, decision) {
+  // The inbox shows cards from every bot, so the note goes in the thread the
+  // card came from rather than whichever bot happens to be selected.
+  const owner = (state.pending.find((p) => p.id === id) || {}).bot || current
   const r = await api('/api/approve', { method: 'POST', body: JSON.stringify({ id, decision }) })
   state.pending = state.pending.filter((p) => p.id !== id)
   // A request that already timed out cannot be approved after the fact; saying
   // otherwise would tell the user the opposite of what happened.
-  push(current, 'sys', r.settled
+  push(owner, 'sys', r.settled
     ? `you ${decision === 'allow' ? 'approved' : 'denied'} it`
     : 'too late — that request had already expired (denied)')
   render()
@@ -202,9 +205,10 @@ async function decide(id, decision) {
 // An amendment is a denial carrying an instruction: the bot makes the change
 // and asks again, so you see the real payload before it runs.
 async function amend(id, instruction) {
+  const owner = (state.pending.find((p) => p.id === id) || {}).bot || current
   const r = await api('/api/approve', { method: 'POST', body: JSON.stringify({ id, decision: 'amend', instruction }) })
   state.pending = state.pending.filter((p) => p.id !== id)
-  push(current, 'sys', r.settled ? `sent back: ${instruction}` : 'too late — that request had already expired (denied)')
+  push(owner, 'sys', r.settled ? `sent back: ${instruction}` : 'too late — that request had already expired (denied)')
   render()
 }
 

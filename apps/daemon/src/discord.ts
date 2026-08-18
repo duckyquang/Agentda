@@ -96,6 +96,8 @@ export function createDiscordBridge(deps: DiscordDeps) {
       .catch(() => {})
   })
 
+  client.once(Events.ClientReady, (c) => console.log(`Discord bridge live as ${c.user.tag}`))
+
   return {
     client,
     bridge,

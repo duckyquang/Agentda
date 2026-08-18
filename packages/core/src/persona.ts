@@ -204,12 +204,16 @@ export interface PersonaPatch {
   prompt?: string
 }
 
-const tomlValue = (v: unknown): string =>
-  Array.isArray(v)
-    ? `[${v.map((x) => tomlValue(x)).join(', ')}]`
-    : typeof v === 'string'
-      ? JSON.stringify(v)
-      : String(v)
+const tomlValue = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map((x) => tomlValue(x)).join(', ')}]`
+  if (typeof v === 'string') return JSON.stringify(v)
+  if (typeof v === 'boolean') return String(v)
+  // NaN and Infinity have TOML spellings that mean something else entirely, and
+  // a bad number here would leave bot.toml unparseable — which makes the bot
+  // vanish on the next reload.
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  throw new Error(`cannot write ${typeof v} to bot.toml`)
+}
 
 // Replaces top-level keys in place, appending the ones that are missing ABOVE
 // the first table header — an appended key after `[[routines]]` would silently
@@ -255,12 +259,18 @@ const PATCH_KEYS: Record<keyof PersonaPatch, string> = {
 }
 
 export function updatePersona(p: Persona, patch: PersonaPatch): Persona {
-  if (patch.prompt !== undefined) writeFileSync(join(p.dir, 'prompt.md'), patch.prompt)
   const values: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(patch)) {
-    if (key === 'prompt' || value === undefined) continue
-    values[PATCH_KEYS[key as keyof PersonaPatch]] = value
+    const configKey = PATCH_KEYS[key as keyof PersonaPatch]
+    // The patch arrives over HTTP, so anything not on the list is dropped
+    // rather than written out as a config key nobody recognises.
+    if (!configKey || key === 'prompt' || value === undefined) continue
+    values[configKey] = value
   }
+  // Validated before anything is written: a half-applied edit would leave the
+  // prompt changed and the config not, or worse.
+  for (const v of Object.values(values)) if (v !== null) tomlValue(v)
+  if (patch.prompt !== undefined) writeFileSync(join(p.dir, 'prompt.md'), patch.prompt)
   if (Object.keys(values).length) setConfigValues(join(p.dir, 'bot.toml'), values)
   return loadPersona(p.dir)
 }

@@ -178,6 +178,11 @@ export function withPacks(persona: Persona, available: Pack[], env: NodeJS.Proce
       ...persona.policy,
       grants: [...persona.policy.grants, ...grants.grants],
       autoApprove: [...persona.policy.autoApprove, ...grants.autoApprove],
+      // Outbound verbs join the always-ask list, not just the not-auto-approved
+      // list. Otherwise a bot in Auto would send mail on a third-party server's
+      // behalf unattended, which is exactly the class FR-44 seeds that list
+      // with — and a pack is a server we do not control.
+      alwaysAsk: [...persona.policy.alwaysAsk, ...grants.outbound],
     },
   }
 }

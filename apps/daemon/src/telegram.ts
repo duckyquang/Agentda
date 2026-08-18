@@ -1,4 +1,5 @@
-import type { ApprovalQueue, ApprovalRequest, Owners, Persona } from '@agentda/core'
+import type { ApprovalQueue, ApprovalRequest, Owners, Persona, VoiceConfig } from '@agentda/core'
+import { fetchAudio, transcribe, VoiceUnavailable } from '@agentda/core'
 import { Bot, InlineKeyboard } from 'grammy'
 
 const PLATFORM = 'telegram'
@@ -11,6 +12,7 @@ export interface BridgeDeps {
   onMessage: (persona: Persona, chat: string, text: string, reply: (s: string) => Promise<void>) => Promise<void>
   onCommand: (cmd: string, args: string, chat: string, reply: (s: string) => Promise<void>) => Promise<void>
   logDropped: (userId: string, why: string) => void
+  voice: VoiceConfig
 }
 
 // Telegram bridge: long polling, so no public URL and it works from a laptop
@@ -56,19 +58,27 @@ export function createBridge(deps: BridgeDeps) {
     pendingMsgs.delete(id)
   })
 
-  bot.on('message:text', async (ctx) => {
-    const text = ctx.message.text
-    if (!(await guard(ctx.from?.id, ctx, text))) return
-
-    const chat = String(ctx.chat.id)
-    const reply = async (s: string) => {
-      // Telegram caps messages at 4096 chars.
-      for (let i = 0; i < s.length; i += 4000) await ctx.reply(s.slice(i, i + 4000))
-    }
-
+  // One route for every inbound message, whatever carried it. A transcribed
+  // voice note has to be able to answer an approval card exactly like typed
+  // text does, so there is one place where "yes" becomes a decision (FR-21).
+  const route = async (text: string, chat: string, isPrivate: boolean, reply: (s: string) => Promise<void>) => {
     if (text.startsWith('/')) {
       const [cmd, ...rest] = text.slice(1).split(/\s+/)
       await deps.onCommand(cmd.split('@')[0], rest.join(' '), chat, reply)
+      return
+    }
+
+    // A card is open in this thread and you typed at it: answer it rather than
+    // starting a turn (FR-21). Only text the parser is sure about counts —
+    // anything else is an ordinary message, because misreading a sentence as
+    // "yes" would run something nobody approved.
+    const answered = deps.queue.answerByText(text, { chat })
+    if (answered) {
+      await reply(
+        answered.amendment
+          ? `Sent back for a change: ${answered.amendment}\nYou'll get a new card with the revised ${answered.tool} call.`
+          : `${answered.decision === 'allow' ? 'Approved' : 'Denied'} — ${answered.tool}.`,
+      )
       return
     }
 
@@ -76,12 +86,45 @@ export function createBridge(deps: BridgeDeps) {
     // Explicit addressing in group chats (FR-35): a bot acts when named. In a
     // 1:1 chat the single bot answers, or the first one if several are loaded.
     const named = personas.find((p) => new RegExp(`(^|\\s)@?${p.id}\\b`, 'i').test(text))
-    const persona = named ?? (ctx.chat.type === 'private' ? personas[0] : undefined)
+    const persona = named ?? (isPrivate ? personas[0] : undefined)
     if (!persona) {
       if (personas.length) await reply(`Name a bot: ${personas.map((p) => p.id).join(', ')}`)
       return
     }
     await deps.onMessage(persona, chat, text, reply)
+  }
+
+  // Telegram caps messages at 4096 chars.
+  const replyTo = (ctx: { reply: (s: string) => Promise<unknown> }) => async (s: string) => {
+    for (let i = 0; i < s.length; i += 4000) await ctx.reply(s.slice(i, i + 4000))
+  }
+
+  bot.on('message:text', async (ctx) => {
+    const text = ctx.message.text
+    if (!(await guard(ctx.from?.id, ctx, text))) return
+    await route(text, String(ctx.chat.id), ctx.chat.type === 'private', replyTo(ctx))
+  })
+
+  // Voice notes (ADR 0004). The transcript is echoed before it does anything:
+  // when the thing being transcribed is "yes" to an approval card, the human
+  // has to see what was heard.
+  bot.on('message:voice', async (ctx) => {
+    if (!(await guard(ctx.from?.id, ctx))) return
+    const reply = replyTo(ctx)
+    try {
+      const file = await ctx.api.getFile(ctx.message.voice.file_id)
+      if (!file.file_path) throw new VoiceUnavailable('Telegram returned no path for that voice note')
+      const audio = await fetchAudio(`https://api.telegram.org/file/bot${deps.token}/${file.file_path}`)
+      const text = await transcribe(audio, deps.voice)
+      await reply(`🎤 "${text}"`)
+      await route(text, String(ctx.chat.id), ctx.chat.type === 'private', reply)
+    } catch (err) {
+      await reply(
+        err instanceof VoiceUnavailable
+          ? `I couldn't transcribe that: ${err.message}`
+          : `Voice note failed: ${(err as Error).message}`,
+      )
+    }
   })
 
   // Renders an approval as a card with tappable buttons. Payload is shown in

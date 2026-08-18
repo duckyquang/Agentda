@@ -14,6 +14,7 @@ import {
   tryHandoff,
   setPersonaMode,
   TurnRunner,
+  voiceConfigFromEnv,
 } from '@agentda/core'
 import { ClaudeAdapter } from '@agentda/provider-claude'
 import { CodexAdapter } from '@agentda/provider-codex'
@@ -169,6 +170,18 @@ const api = new ControlApi({
   send: (botId, text) => {
     const p = personas.find((x) => x.id === botId)
     if (!p) return api.emit('message-out', { bot: botId, text: `no bot named ${botId}` })
+    // Same rule as chat: type "yes" at an open card and it answers the card
+    // (FR-21). The desktop has buttons too, but the composer is where your
+    // hands already are.
+    const answered = queue.answerByText(text, { chat: `desktop:${botId}` })
+    if (answered) {
+      return api.emit('message-out', {
+        bot: p.id,
+        text: answered.amendment
+          ? `Sent back for a change: ${answered.amendment} — expect a revised ${answered.tool} card.`
+          : `${answered.decision === 'allow' ? 'Approved' : 'Denied'} — ${answered.tool}.`,
+      })
+    }
     // Deliberately not awaited: the turn may pause on an approval for as long
     // as the human takes, and the UI shows that card meanwhile.
     void runner
@@ -205,6 +218,7 @@ const bridge = token ? createBridge({
   token,
   owners,
   queue,
+  voice: voiceConfigFromEnv(),
   personas: () => personas,
   logDropped: (userId, why) => console.warn(`dropped update from ${userId}: ${why}`),
   onMessage: async (persona, chat, text, reply) => {

@@ -12,7 +12,7 @@ const dir = mkdtempSync(join(tmpdir(), 'agentda-tg-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 let n = 0
-function harness(opts: { paired?: number } = {}) {
+function harness(opts: { paired?: number; deps?: Record<string, unknown> } = {}) {
   const db = openDb(join(dir, `tg${n++}.db`))
   const owners = new Owners(db)
   if (opts.paired) owners.claim('telegram', owners.mintCode('telegram'), opts.paired)
@@ -27,6 +27,8 @@ function harness(opts: { paired?: number } = {}) {
     onMessage: async (_p, _chat, text) => void messages.push(text),
     onCommand: async (cmd) => void messages.push(`/${cmd}`),
     logDropped: (id, why) => dropped.push(`${id}:${why}`),
+    voice: { backend: 'openai', openaiKey: 'test-key', openaiModel: 'whisper-1' },
+    ...opts.deps,
   })
   // Stop grammY from calling getMe over the network.
   bridge.bot.botInfo = { id: 1, is_bot: true, first_name: 'test', username: 'testbot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business_account: false, has_main_web_app: false }
@@ -41,6 +43,17 @@ const textUpdate = (userId: number, text: string) => ({
     chat: { id: 42, type: 'private' as const, first_name: 'x' },
     from: { id: userId, is_bot: false, first_name: 'x' },
     text,
+  },
+})
+
+const voiceUpdate = (userId: number) => ({
+  update_id: n++,
+  message: {
+    message_id: 1,
+    date: 0,
+    chat: { id: 42, type: 'private' as const, first_name: 'x' },
+    from: { id: userId, is_bot: false, first_name: 'x' },
+    voice: { file_id: 'AwAC-fake', file_unique_id: 'u1', duration: 2, mime_type: 'audio/ogg' },
   },
 })
 
@@ -116,5 +129,113 @@ describe('telegram bridge access control', () => {
     h.bridge.bot.api.config.use(async () => ({ ok: true as const, result: {} as any }))
     await h.bridge.bot.handleUpdate(textUpdate(111, '/audit') as any)
     expect(h.messages).toEqual(['/audit'])
+  })
+})
+
+describe('answering an approval by chat', () => {
+  it('a typed yes settles the open card instead of starting a turn', async () => {
+    const h = harness({ paired: 111 })
+    h.bridge.bot.api.config.use(async () => ({ ok: true as const, result: {} as any }))
+    const pending = h.queue.request(
+      { bot: 'chief', chat: '42', tool: 'mcp__email__email_send', input: { to: 'a@b.c' } },
+      { mode: 'ask', grants: ['*'], autoApprove: [], alwaysAsk: [] },
+    )
+    await new Promise((r) => setImmediate(r))
+
+    await h.bridge.bot.handleUpdate(textUpdate(111, 'yes') as any)
+    await expect(pending).resolves.toMatchObject({ decision: 'allow', source: 'human-text' })
+    expect(h.messages).toEqual([]) // answering a card is not a new bot turn
+  })
+
+  it('an amendment denies the call and passes the instruction on', async () => {
+    const h = harness({ paired: 111 })
+    h.bridge.bot.api.config.use(async () => ({ ok: true as const, result: {} as any }))
+    const pending = h.queue.request(
+      { bot: 'chief', chat: '42', tool: 'mcp__email__email_send', input: { to: 'a@b.c' } },
+      { mode: 'ask', grants: ['*'], autoApprove: [], alwaysAsk: [] },
+    )
+    await new Promise((r) => setImmediate(r))
+
+    await h.bridge.bot.handleUpdate(textUpdate(111, 'approve but cc anna@example.com') as any)
+    const res = await pending
+    expect(res.decision).toBe('deny')
+    expect(res.reason).toContain('cc anna@example.com')
+  })
+
+  it('an ordinary message with a card open is still a message', async () => {
+    const h = harness({ paired: 111 })
+    h.bridge.bot.api.config.use(async () => ({ ok: true as const, result: {} as any }))
+    void h.queue.request(
+      { bot: 'chief', chat: '42', tool: 'Write', input: {} },
+      { mode: 'ask', grants: ['*'], autoApprove: [], alwaysAsk: [] },
+    )
+    await new Promise((r) => setImmediate(r))
+
+    await h.bridge.bot.handleUpdate(textUpdate(111, 'what would that write exactly?') as any)
+    expect(h.messages).toEqual(['what would that write exactly?'])
+    expect(h.queue.pendingCount()).toBe(1)
+    h.queue.denyAll()
+  })
+})
+
+describe('voice notes', () => {
+  const stubNetwork = (transcript: string) =>
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) =>
+      String(url).includes('api.telegram.org/file')
+        ? new Response(new Uint8Array([1, 2, 3]))
+        : new Response(JSON.stringify({ text: transcript }), { headers: { 'content-type': 'application/json' } }),
+    )
+
+  it('transcribes, echoes what it heard, and routes it like typed text', async () => {
+    const h = harness({ paired: 111 })
+    const sent: string[] = []
+    h.bridge.bot.api.config.use(async (prev, method, payload: any) => {
+      if (method === 'getFile') return { ok: true as const, result: { file_id: 'x', file_unique_id: 'u', file_path: 'voice/f.oga' } as any }
+      if (method === 'sendMessage') sent.push(payload.text)
+      return { ok: true as const, result: {} as any }
+    })
+    const fetchStub = stubNetwork('remind me to call the dentist')
+
+    await h.bridge.bot.handleUpdate(voiceUpdate(111) as any)
+
+    expect(sent[0]).toBe('🎤 "remind me to call the dentist"') // heard before acted on
+    expect(h.messages).toEqual(['remind me to call the dentist'])
+    fetchStub.mockRestore()
+  })
+
+  it('a spoken yes answers the open card', async () => {
+    const h = harness({ paired: 111 })
+    h.bridge.bot.api.config.use(async (prev, method) =>
+      method === 'getFile'
+        ? { ok: true as const, result: { file_id: 'x', file_unique_id: 'u', file_path: 'voice/f.oga' } as any }
+        : { ok: true as const, result: {} as any },
+    )
+    const fetchStub = stubNetwork('yes')
+    const pending = h.queue.request(
+      { bot: 'chief', chat: '42', tool: 'Write', input: {} },
+      { mode: 'ask', grants: ['*'], autoApprove: [], alwaysAsk: [] },
+    )
+    await new Promise((r) => setImmediate(r))
+
+    await h.bridge.bot.handleUpdate(voiceUpdate(111) as any)
+    await expect(pending).resolves.toMatchObject({ decision: 'allow', source: 'human-text' })
+    fetchStub.mockRestore()
+  })
+
+  it('says what is missing rather than falling back to the cloud', async () => {
+    const h = harness({ paired: 111, deps: { voice: { backend: 'local', whisperBin: 'whisper-cli' } } })
+    const sent: string[] = []
+    h.bridge.bot.api.config.use(async (prev, method, payload: any) => {
+      if (method === 'getFile') return { ok: true as const, result: { file_id: 'x', file_unique_id: 'u', file_path: 'voice/f.oga' } as any }
+      if (method === 'sendMessage') sent.push(payload.text)
+      return { ok: true as const, result: {} as any }
+    })
+    const fetchStub = stubNetwork('never reached')
+
+    await h.bridge.bot.handleUpdate(voiceUpdate(111) as any)
+
+    expect(sent[0]).toContain('AGENTDA_WHISPER_MODEL')
+    expect(h.messages).toEqual([])
+    fetchStub.mockRestore()
   })
 })

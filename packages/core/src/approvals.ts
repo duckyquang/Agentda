@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from './db'
 import { type BotPolicy, type DecisionSource, decide, type Mode } from './gate'
+import { amendmentReason, parseApprovalReply } from './reply'
 
 export interface ApprovalRequest {
   id: string
@@ -24,7 +25,7 @@ export interface Resolution {
 // platform; the daemon supplies an `ask` callback that renders the request
 // wherever the human is.
 export class ApprovalQueue {
-  private waiting = new Map<string, { resolve: (r: Resolution) => void; timer: NodeJS.Timeout }>()
+  private waiting = new Map<string, { req: ApprovalRequest; resolve: (r: Resolution) => void; timer: NodeJS.Timeout }>()
 
   constructor(
     private db: Db,
@@ -97,13 +98,40 @@ export class ApprovalQueue {
         this.timeoutMs,
       )
       timer.unref?.() // a pending approval must never hold the process open
-      this.waiting.set(req.id, { resolve, timer })
+      this.waiting.set(req.id, { req, resolve, timer })
       void this.opts.ask?.(req)
     })
 
     this.log({ ...args, chat }, mode, resolution)
     await this.opts.onResolved?.(req, resolution)
     return resolution
+  }
+
+  // A typed answer carries no id, so it lands on the newest open card in the
+  // same thread. One implementation for every surface: Telegram text, a
+  // transcribed voice note, and the desktop composer all end up here, which is
+  // why the parsing does not live in any one bridge.
+  answerByText(
+    text: string,
+    filter: { bot?: string; chat?: string | null } = {},
+  ): { id: string; tool: string; decision: 'allow' | 'deny'; amendment?: string } | undefined {
+    const target = this.open(filter)[0]
+    if (!target) return undefined
+    const answer = parseApprovalReply(text)
+    if (!answer) return undefined
+    const r: Resolution =
+      answer.kind === 'allow'
+        ? { decision: 'allow', source: 'human-text', reason: 'approved in chat' }
+        : answer.kind === 'deny'
+          ? { decision: 'deny', source: 'human-text', reason: 'denied in chat' }
+          : { decision: 'deny', source: 'human-text', reason: amendmentReason(answer.instruction) }
+    if (!this.settle(target.id, r)) return undefined
+    return {
+      id: target.id,
+      tool: target.tool,
+      decision: r.decision,
+      amendment: answer.kind === 'amend' ? answer.instruction : undefined,
+    }
   }
 
   // Called by the bridge when a human taps or types an answer.
@@ -119,6 +147,15 @@ export class ApprovalQueue {
 
   pendingCount(): number {
     return this.waiting.size
+  }
+
+  // Open requests, newest first. A typed "yes" names no id, so whoever handles
+  // it needs to know which card the human is most plausibly answering.
+  open(filter: { bot?: string; chat?: string | null } = {}): ApprovalRequest[] {
+    return [...this.waiting.values()]
+      .map((w) => w.req)
+      .filter((r) => (filter.bot === undefined || r.bot === filter.bot) && (filter.chat === undefined || r.chat === filter.chat))
+      .reverse()
   }
 
   // Deny everything still open — used on shutdown so no provider turn is left

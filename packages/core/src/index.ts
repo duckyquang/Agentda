@@ -7,17 +7,23 @@ export { amendmentReason, type ApprovalReply, parseApprovalReply } from './reply
 export { fetchAudio, transcribe, type VoiceBackend, type VoiceConfig, voiceConfigFromEnv, VoiceUnavailable } from './voice'
 export { type BudgetVerdict, checkBudget, type Guardrails, recordTurn } from './budget'
 export {
+  archivePersona,
+  createPersona,
   loadPersona,
   loadPersonas,
   memoryDir,
   type Persona,
+  type PersonaPatch,
   readMemory,
+  setConfigValues,
+  updatePersona,
   setPersonaMode,
   writeMemory,
 } from './persona'
 export { TurnRunner, type TurnResult } from './runner'
 export { Scheduler } from './scheduler'
 export { Owners } from './owners'
+export { TokenStore } from './tokens'
 export {
   failoverNotice,
   type FailoverStep,

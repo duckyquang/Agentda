@@ -41,6 +41,12 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
     setMode: () => {},
     pause: () => {},
     isPaused: () => false,
+    createBot: (spec) => persona(spec.id),
+    updateBot: (id) => persona(id),
+    archiveBot: (id) => join(dir, '.trash', id),
+    setToken: () => {},
+    clearToken: () => {},
+    tokenIds: () => [],
     ...over,
   })
   const port = await api.listen(0)
@@ -174,3 +180,72 @@ describe('control API', () => {
     await s.api.close()
   })
 })
+
+describe('persona management over the API', () => {
+  it('creates, edits, and archives a bot, and reports a bad id as a 400', async () => {
+    const created: string[] = []
+    const patched: unknown[] = []
+    const s = await serve({
+      createBot: (spec) => {
+        if (spec.id === 'Bad Id') throw new Error('bot id must be lowercase letters, digits or dashes (max 32)')
+        created.push(spec.id)
+        return persona(spec.id)
+      },
+      updateBot: (id, patch) => {
+        patched.push({ id, patch })
+        return persona(id)
+      },
+      archiveBot: (id) => `/tmp/.trash/${id}`,
+    })
+
+    const post = (path: string, body: unknown) =>
+      fetch(s.url(path), { method: 'POST', headers: s.auth, body: JSON.stringify(body) })
+
+    expect((await post('/api/bots', { id: 'scout', name: 'Scout' })).status).toBe(200)
+    expect(created).toEqual(['scout'])
+
+    const bad = await post('/api/bots', { id: 'Bad Id' })
+    expect(bad.status).toBe(400)
+    expect((await bad.json()).error).toMatch(/lowercase/)
+
+    expect((await post('/api/bots/chief', { mode: 'auto', browser: true })).status).toBe(200)
+    expect(patched).toEqual([{ id: 'chief', patch: { mode: 'auto', browser: true } }])
+
+    const gone = await fetch(s.url('/api/bots/chief'), { method: 'DELETE', headers: s.auth })
+    expect((await gone.json()).archivedTo).toContain('.trash')
+  })
+
+  it('serves the editor everything it needs, including the prompt', async () => {
+    const p = { ...persona('chief'), prompt: 'You are Chief.', model: 'llama3.1:8b' }
+    const s = await serve({ personas: () => [p], tokenIds: () => ['chief'] })
+    const detail = await (await fetch(s.url('/api/bots/chief'), { headers: s.auth })).json()
+    expect(detail).toMatchObject({ id: 'chief', prompt: 'You are Chief.', model: 'llama3.1:8b', ownIdentity: true })
+    expect((await fetch(s.url('/api/bots/nobody'), { headers: s.auth })).status).toBe(404)
+  })
+
+  it('takes a bot token in and never hands one back out', async () => {
+    const stored: Record<string, string> = {}
+    const s = await serve({ setToken: (bot, token) => void (stored[bot] = token), tokenIds: () => Object.keys(stored) })
+    await fetch(s.url('/api/bots/chief/token'), {
+      method: 'POST',
+      headers: s.auth,
+      body: JSON.stringify({ token: '8123456789:AAHfake-token-material-that-is-long' }),
+    })
+    expect(stored.chief).toContain('8123456789')
+    const state = await (await fetch(s.url('/api/state'), { headers: s.auth })).json()
+    expect(JSON.stringify(state)).not.toContain('8123456789')
+    expect(state.bots[0].ownIdentity).toBe(true)
+  })
+
+  it('rejects a token the registry would not accept, without pretending it worked', async () => {
+    const s = await serve({
+      setToken: () => {
+        throw new Error('that does not look like a BotFather token (expected 123456789:AA...)')
+      },
+    })
+    const r = await fetch(s.url('/api/bots/chief/token'), { method: 'POST', headers: s.auth, body: JSON.stringify({ token: 'nope' }) })
+    expect(r.status).toBe(400)
+    expect((await r.json()).error).toMatch(/BotFather/)
+  })
+})
+

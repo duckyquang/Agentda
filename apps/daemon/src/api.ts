@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ApprovalQueue, ApprovalRequest, Db, Persona } from '@agentda/core'
+import type { ApprovalQueue, ApprovalRequest, Db, Persona, PersonaPatch } from '@agentda/core'
 
 // Loopback-only control API for the desktop app.
 //
@@ -21,6 +21,14 @@ export interface ApiDeps {
   setMode: (botId: string, mode: 'ask' | 'auto') => void
   pause: (on: boolean) => void
   isPaused: () => boolean
+  // Persona management (PLAN Phase 2). The daemon owns the files; the API is
+  // just the door the desktop app knocks on.
+  createBot: (spec: { id: string; name?: string } & PersonaPatch) => Persona
+  updateBot: (botId: string, patch: PersonaPatch) => Persona
+  archiveBot: (botId: string) => string
+  setToken: (botId: string, token: string) => void
+  clearToken: (botId: string) => void
+  tokenIds: () => string[]
 }
 
 const UI_DIR = fileURLToPath(new URL('../../desktop/ui', import.meta.url))
@@ -78,6 +86,8 @@ export class ControlApi {
       const presented = req.headers.authorization?.replace(/^Bearer /, '') ?? url.searchParams.get('token')
       if (presented !== this.token) return void json(401, { error: 'unauthorized' })
 
+      const botRoute = /^\/api\/bots\/([\w-]+)(\/token)?$/.exec(url.pathname)
+
       if (req.method === 'GET' && url.pathname === '/api/state') {
         return void json(200, {
           paused: this.deps.isPaused(),
@@ -88,9 +98,63 @@ export class ControlApi {
             provider: p.provider,
             providers: p.providers.map((x) => x.provider),
             tools: { browser: p.browser, email: p.email, memory: p.agentdaTools },
+            ownIdentity: this.deps.tokenIds().includes(p.id),
           })),
           pending: this.deps.pending().map((r) => ({ id: r.id, bot: r.bot, tool: r.tool, input: r.input, reason: r.reason })),
         })
+      }
+
+      // Everything the persona editor needs, including the prompt, which is a
+      // file rather than a config key.
+      if (req.method === 'GET' && botRoute && !botRoute[2]) {
+        const p = this.deps.personas().find((x) => x.id === botRoute[1])
+        if (!p) return void json(404, { error: 'no such bot' })
+        return void json(200, {
+          id: p.id,
+          name: p.name,
+          dir: p.dir,
+          mode: p.policy.mode,
+          prompt: p.prompt,
+          providers: p.providers.map((x) => x.provider),
+          model: p.model ?? '',
+          allowMeteredFailover: p.allowMeteredFailover,
+          agentdaTools: p.agentdaTools,
+          browser: p.browser,
+          browserSurface: p.browserSurface,
+          email: p.email,
+          scope: p.scope,
+          autoApprove: p.policy.autoApprove,
+          alwaysAsk: p.policy.alwaysAsk,
+          dailyTurnCap: p.dailyTurnCap ?? null,
+          weeklyTurnCap: p.weeklyTurnCap ?? null,
+          routines: p.routines,
+          ownIdentity: this.deps.tokenIds().includes(p.id),
+        })
+      }
+
+      // Routine history: at-most-once firing is only believable if you can see
+      // what actually fired.
+      if (req.method === 'GET' && url.pathname === '/api/routines') {
+        const bot = url.searchParams.get('bot')
+        const rows = bot
+          ? this.deps.db
+              .prepare('SELECT * FROM routine_runs WHERE bot = ? ORDER BY ran_at DESC LIMIT 100')
+              .all(bot)
+          : this.deps.db.prepare('SELECT * FROM routine_runs ORDER BY ran_at DESC LIMIT 100').all()
+        return void json(200, { rows })
+      }
+
+      if (req.method === 'DELETE' && botRoute) {
+        if (botRoute[2]) {
+          this.deps.clearToken(botRoute[1])
+          return void json(200, { ok: true })
+        }
+        // Archived, not deleted: a bot's memory is the user's own writing.
+        try {
+          return void json(200, { archivedTo: this.deps.archiveBot(botRoute[1]) })
+        } catch (err) {
+          return void json(400, { error: (err as Error).message })
+        }
       }
 
       if (req.method === 'GET' && url.pathname === '/api/audit') {
@@ -125,6 +189,27 @@ export class ControlApi {
         if (url.pathname === '/api/send') {
           this.deps.send(body.bot, String(body.text ?? ''))
           return void json(202, { accepted: true })
+        }
+        if (url.pathname === '/api/bots') {
+          try {
+            return void json(200, { bot: this.deps.createBot(body).id })
+          } catch (err) {
+            return void json(400, { error: (err as Error).message })
+          }
+        }
+        if (botRoute) {
+          try {
+            if (botRoute[2]) {
+              // The token never comes back out of this API — it goes in and
+              // stays in the 0600 registry.
+              this.deps.setToken(botRoute[1], String(body.token ?? ''))
+              return void json(200, { ok: true })
+            }
+            this.deps.updateBot(botRoute[1], body as PersonaPatch)
+            return void json(200, { ok: true })
+          } catch (err) {
+            return void json(400, { error: (err as Error).message })
+          }
         }
       }
 

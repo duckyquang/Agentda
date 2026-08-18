@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parse as parseToml } from 'smol-toml'
@@ -164,4 +164,124 @@ export function setPersonaMode(p: Persona, mode: Mode): void {
     : `mode = "${mode}"\n${src}`
   writeFileSync(cfgPath, next)
   p.policy.mode = mode
+}
+
+// --- Persona management (PLAN Phase 2) ---------------------------------------
+//
+// A bot is a directory, so creating and editing one is file work, not database
+// work. Edits are made line by line rather than by re-serialising the TOML,
+// because bot.toml is a file the user also opens and comments; a round-trip
+// through a TOML writer would silently eat their comments and reorder
+// everything the first time they touched a toggle in the desktop app.
+
+export interface PersonaPatch {
+  name?: string
+  mode?: Mode
+  providers?: string[]
+  model?: string | null
+  allowMeteredFailover?: boolean
+  agentdaTools?: boolean
+  browser?: boolean
+  browserSurface?: 'shadow' | 'on-screen'
+  email?: boolean
+  scope?: string[]
+  autoApprove?: string[]
+  alwaysAsk?: string[]
+  dailyTurnCap?: number | null
+  weeklyTurnCap?: number | null
+  prompt?: string
+}
+
+const tomlValue = (v: unknown): string =>
+  Array.isArray(v)
+    ? `[${v.map((x) => tomlValue(x)).join(', ')}]`
+    : typeof v === 'string'
+      ? JSON.stringify(v)
+      : String(v)
+
+// Replaces top-level keys in place, appending the ones that are missing ABOVE
+// the first table header — an appended key after `[[routines]]` would silently
+// become part of that routine instead of the bot.
+export function setConfigValues(cfgPath: string, values: Record<string, unknown>): void {
+  let lines = readFileSync(cfgPath, 'utf8').split('\n')
+  for (const [key, value] of Object.entries(values)) {
+    const at = lines.findIndex((l) => new RegExp(`^\\s*${key}\\s*=`).test(l))
+    if (value === null || value === undefined) {
+      if (at >= 0) lines.splice(at, 1)
+      continue
+    }
+    const rendered = `${key} = ${tomlValue(value)}`
+    if (at >= 0) {
+      lines[at] = rendered
+    } else {
+      const firstTable = lines.findIndex((l) => /^\s*\[/.test(l))
+      lines.splice(firstTable === -1 ? lines.length : firstTable, 0, rendered)
+    }
+  }
+  // Keep the file tidy when keys are inserted next to a trailing blank line.
+  while (lines.length > 1 && lines.at(-1) === '' && lines.at(-2) === '') lines.pop()
+  writeFileSync(cfgPath, lines.join('\n'))
+}
+
+const PATCH_KEYS: Record<keyof PersonaPatch, string> = {
+  name: 'name',
+  mode: 'mode',
+  providers: 'providers',
+  model: 'model',
+  allowMeteredFailover: 'allow_metered_failover',
+  agentdaTools: 'agentda_tools',
+  browser: 'browser',
+  browserSurface: 'browser_surface',
+  email: 'email',
+  scope: 'scope',
+  autoApprove: 'auto_approve',
+  alwaysAsk: 'always_ask',
+  dailyTurnCap: 'daily_turn_cap',
+  weeklyTurnCap: 'weekly_turn_cap',
+  prompt: 'prompt', // handled separately: prompt.md, not a config key
+}
+
+export function updatePersona(p: Persona, patch: PersonaPatch): Persona {
+  if (patch.prompt !== undefined) writeFileSync(join(p.dir, 'prompt.md'), patch.prompt)
+  const values: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'prompt' || value === undefined) continue
+    values[PATCH_KEYS[key as keyof PersonaPatch]] = value
+  }
+  if (Object.keys(values).length) setConfigValues(join(p.dir, 'bot.toml'), values)
+  return loadPersona(p.dir)
+}
+
+const VALID_ID = /^[a-z0-9][a-z0-9-]{0,31}$/
+
+export function createPersona(botsDir: string, spec: { id: string; name?: string } & PersonaPatch): Persona {
+  // The id becomes a directory name and is matched against message text, so it
+  // stays boring on purpose.
+  if (!VALID_ID.test(spec.id)) throw new Error('bot id must be lowercase letters, digits or dashes (max 32)')
+  const dir = join(botsDir, spec.id)
+  if (existsSync(join(dir, 'bot.toml'))) throw new Error(`a bot called ${spec.id} already exists`)
+  mkdirSync(join(dir, 'memory'), { recursive: true })
+  writeFileSync(
+    join(dir, 'bot.toml'),
+    [`id = "${spec.id}"`, `name = ${JSON.stringify(spec.name ?? spec.id)}`, 'mode = "ask"', ''].join('\n'),
+  )
+  writeFileSync(join(dir, 'prompt.md'), spec.prompt ?? `You are ${spec.name ?? spec.id}.\n`)
+  const { id, ...patch } = spec
+  return updatePersona(loadPersona(dir), patch)
+}
+
+// Deleting a bot deletes its memory, which is the user's own writing and the
+// one thing here that cannot be regenerated. So this moves the directory into
+// a trash folder instead: reversible with `mv`, and gone whenever they say so.
+export function archivePersona(botsDir: string, p: Persona, stamp = new Date().toISOString().replace(/[:.]/g, '-')): string {
+  const resolvedBots = resolve(botsDir)
+  const dir = resolve(p.dir)
+  if (dir !== join(resolvedBots, p.id) || !existsSync(join(dir, 'bot.toml'))) {
+    throw new Error(`refusing to archive ${dir}: not a bot directory inside ${resolvedBots}`)
+  }
+  const trash = join(resolvedBots, '.trash')
+  mkdirSync(trash, { recursive: true })
+  const dest = join(trash, `${p.id}-${stamp}`)
+  renameSync(dir, dest)
+  return dest
 }

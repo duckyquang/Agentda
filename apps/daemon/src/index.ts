@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   ApprovalQueue,
+  archivePersona,
+  createPersona,
   HookServer,
   loadPersonas,
   openDb,
@@ -13,6 +15,8 @@ import {
   SessionStore,
   tryHandoff,
   setPersonaMode,
+  TokenStore,
+  updatePersona,
   TurnRunner,
   voiceConfigFromEnv,
 } from '@agentda/core'
@@ -26,6 +30,9 @@ const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
 const db = openDb(join(home, 'agentda.db'))
 const sessions = new SessionStore(join(home, 'agentda.db'))
 const owners = new Owners(db)
+// Bot tokens live here rather than in bot.toml: a bot directory is meant to be
+// copied and shared, a token is a password.
+const tokens = new TokenStore(join(home, 'telegram.json'))
 const botsDir = process.env.AGENTDA_BOTS ?? join(home, 'bots')
 
 let personas = loadPersonas(botsDir)
@@ -50,12 +57,12 @@ const queue = new ApprovalQueue(db, {
     // `desktop:<bot>`, and sending to that id makes the API reject and, being
     // unawaited, take the daemon down with it.
     const chat = isTelegramChat(req.chat) ? req.chat : chatFor.get(req.bot)
-    if (chat) void bridge?.ask(req, chat).catch((e) => console.warn(`telegram ask failed: ${e.message}`))
+    if (chat) void bridgeFor(req.bot)?.ask(req, chat).catch((e: Error) => console.warn(`telegram ask failed: ${e.message}`))
   },
   onResolved: (req, r) => {
     openApprovals.delete(req.id)
     api?.emit('resolved', { id: req.id, decision: r.decision, source: r.source })
-    if (r.source !== 'human-tap') void bridge?.closeCard(req.id, `${r.decision} (${r.source})`)
+    if (r.source !== 'human-tap') void bridgeFor(req.bot)?.closeCard(req.id, `${r.decision} (${r.source})`)
   },
 })
 
@@ -167,6 +174,42 @@ const api = new ControlApi({
     if (on) queue.denyAll('paused by the owner')
   },
   isPaused: () => paused,
+  createBot: (spec) => {
+    const p = createPersona(botsDir, spec)
+    personas = loadPersonas(botsDir)
+    api.emit('bots', { changed: p.id })
+    return p
+  },
+  updateBot: (botId, patch) => {
+    const p = personas.find((x) => x.id === botId)
+    if (!p) throw new Error(`no bot named ${botId}`)
+    const next = updatePersona(p, patch)
+    personas = loadPersonas(botsDir)
+    api.emit('bots', { changed: botId })
+    return next
+  },
+  archiveBot: (botId) => {
+    const p = personas.find((x) => x.id === botId)
+    if (!p) throw new Error(`no bot named ${botId}`)
+    const dest = archivePersona(botsDir, p)
+    tokens.remove(botId)
+    personas = loadPersonas(botsDir)
+    syncBridges()
+    api.emit('bots', { changed: botId })
+    return dest
+  },
+  setToken: (botId, token) => {
+    if (!personas.some((x) => x.id === botId)) throw new Error(`no bot named ${botId}`)
+    tokens.set(botId, token)
+    syncBridges()
+    api.emit('bots', { changed: botId })
+  },
+  clearToken: (botId) => {
+    tokens.remove(botId)
+    syncBridges()
+    api.emit('bots', { changed: botId })
+  },
+  tokenIds: () => tokens.ids(),
   send: (botId, text) => {
     const p = personas.find((x) => x.id === botId)
     if (!p) return api.emit('message-out', { bot: botId, text: `no bot named ${botId}` })
@@ -183,94 +226,146 @@ const api = new ControlApi({
       })
     }
     // Deliberately not awaited: the turn may pause on an approval for as long
-    // as the human takes, and the UI shows that card meanwhile.
-    void runner
-      .run(p, `desktop:${botId}`, text, {
-        onEvent: (e) => {
-          if (e.type === 'result') sessionOwner.set(e.sessionId, p.id)
-        },
-      })
-      .then((res) => {
-        const body = [
-          ...(res.notices ?? []),
-          res.skipped ? `(skipped: ${res.skipped})` : '',
-          res.error ? `${res.error.kind}: ${res.error.hint ?? res.error.message}` : res.text,
-          res.memoryNotice ?? '',
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-        api.emit('message-out', { bot: p.id, text: body || '(no reply)' })
-      })
-      .catch((err) => api.emit('message-out', { bot: p.id, text: `error: ${(err as Error).message}` }))
+    // as the human takes, and the UI shows that card meanwhile. Same path as a
+    // chat message, so the desktop gets handoffs and provider notices too.
+    void runTurn(p, `desktop:${botId}`, text, text).catch((err) =>
+      api.emit('message-out', { bot: p.id, text: `error: ${(err as Error).message}` }),
+    )
   },
 })
 await api.listen()
 console.log(`desktop UI at ${api.url()}`)
 
-// Telegram is optional: without a token the daemon still serves the desktop
-// app, which is the whole point of not coupling them.
-const token = process.env.TELEGRAM_BOT_TOKEN
-if (!token) {
-  console.log('TELEGRAM_BOT_TOKEN not set — running desktop-only (get a token from @BotFather to add chat)')
+// One bridge per Telegram identity (PLAN Phase 2). A persona with its own
+// BotFather token speaks under its own name and avatar; everything else shares
+// the daemon's token. Owner pairing is per Telegram account, not per bot, so a
+// new token needs no new pairing — the same human is already trusted.
+type Bridge = ReturnType<typeof createBridge>
+const SHARED = ''
+const bridges = new Map<string, Bridge>()
+
+const bridgeFor = (botId: string): Bridge | undefined => bridges.get(botId) ?? bridges.get(SHARED)
+
+function startBridge(key: string, botToken: string, bound?: string): void {
+  const bridge = createBridge({
+    token: botToken,
+    owners,
+    queue,
+    voice: voiceConfigFromEnv(),
+    // A bound bridge only ever speaks for its own persona, so a message to it
+    // never has to name anyone.
+    personas: () => (bound ? personas.filter((p) => p.id === bound) : personas),
+    logDropped: (userId, why) => console.warn(`dropped update from ${userId}: ${why}`),
+    onMessage: async (persona, chat, text) => {
+      await runTurn(persona, chat, stripAddress(text, persona), text)
+    },
+    onCommand: async (cmd, args, chat, reply) => handleCommand(cmd, args, chat, reply),
+  })
+  bridges.set(key, bridge)
+  void bridge.bot
+    .start({ drop_pending_updates: true, onStart: (me) => console.log(`${bound ?? 'shared'} bridge live as @${me.username}`) })
+    .catch((err) => {
+      bridges.delete(key)
+      const e = err as { error_code?: number; message: string }
+      console.error(
+        e.error_code === 401
+          ? `Telegram rejected the token for ${bound ?? 'the shared bridge'}. Check it against what @BotFather gave you.`
+          : e.error_code === 409
+            ? `Another process is already polling the token for ${bound ?? 'the shared bridge'} — stop the other daemon first.`
+            : `Telegram bridge (${bound ?? 'shared'}) failed: ${e.message}`,
+      )
+    })
 }
 
-const bridge = token ? createBridge({
-  token,
-  owners,
-  queue,
-  voice: voiceConfigFromEnv(),
-  personas: () => personas,
-  logDropped: (userId, why) => console.warn(`dropped update from ${userId}: ${why}`),
-  onMessage: async (persona, chat, text, reply) => {
-    await runTurn(persona, chat, stripAddress(text, persona), reply, text)
-  },
-  onCommand: async (cmd, args, chat, reply) => {
-    if (cmd === 'mode') {
-      const [botId, mode] = args.split(/\s+/)
-      const p = personas.find((x) => x.id === botId)
-      if (!p || (mode !== 'ask' && mode !== 'auto')) return reply('usage: /mode <bot> ask|auto')
-      setPersonaMode(p, mode)
-      return reply(
-        mode === 'auto'
-          ? `${p.id} is now in AUTO mode. It will run gated actions without asking, except: ${p.policy.alwaysAsk.join(', ')}. Everything is still audited, budgets still apply, and /pause drops it back to Ask.`
-          : `${p.id} is back in ASK mode.`,
-      )
+// Starts bridges for newly-tokened personas and stops ones whose token was
+// removed. Called at boot and whenever a token or the persona list changes.
+function syncBridges(): void {
+  for (const p of personas) {
+    const t = tokens.get(p.id)
+    if (t && !bridges.has(p.id)) startBridge(p.id, t, p.id)
+  }
+  for (const [key, bridge] of bridges) {
+    if (key === SHARED) continue
+    if (!tokens.get(key) || !personas.some((p) => p.id === key)) {
+      bridges.delete(key)
+      void bridge.bot.stop().catch(() => {})
     }
-    if (cmd === 'pause') {
-      paused = true
-      queue.denyAll('paused by the owner')
-      return reply('Paused: every bot is back to Ask, and pending approvals were denied.')
-    }
-    if (cmd === 'resume') {
-      paused = false
-      return reply('Resumed: bots use their own modes again.')
-    }
-    if (cmd === 'audit') {
-      const rows = db
-        .prepare('SELECT ts, bot, tool, decision, source, mode FROM audit_log ORDER BY id DESC LIMIT 15')
-        .all() as any[]
-      return reply(
-        rows.length
-          ? rows.map((r) => `${r.ts} ${r.bot} ${r.tool} → ${r.decision} (${r.source}, ${r.mode})`).join('\n')
-          : 'audit log is empty',
-      )
-    }
-    if (cmd === 'bots') {
-      return reply(personas.map((p) => `${p.id} — ${p.policy.mode}${paused ? ' (paused)' : ''}`).join('\n'))
-    }
-    if (cmd === 'routines') {
-      return reply(
-        personas.flatMap((p) => p.routines.map((r) => `${p.id}/${r.id} ${r.cron} ${r.enabled ? '' : '(disabled)'}`)).join('\n') ||
-          'no routines',
-      )
-    }
-    if (cmd === 'reload') {
-      personas = loadPersonas(botsDir)
-      return reply(`reloaded ${personas.length} bot(s)`)
-    }
-    return reply('commands: /bots /mode <bot> ask|auto /pause /resume /audit /routines /reload')
-  },
-}) : undefined
+  }
+}
+
+// Telegram is optional: without any token the daemon still serves the desktop
+// app, which is the whole point of not coupling them.
+const sharedToken = process.env.TELEGRAM_BOT_TOKEN
+if (sharedToken) startBridge(SHARED, sharedToken)
+syncBridges()
+if (!bridges.size) {
+  console.log('no Telegram token — running desktop-only (add one from @BotFather in the app, or set TELEGRAM_BOT_TOKEN)')
+}
+
+// Whatever the bot says, said by the right identity: its own bridge when it has
+// one, the shared bridge otherwise, and the desktop app either way.
+async function say(persona: Persona, chat: string, text: string): Promise<void> {
+  if (!text) return
+  api.emit('message-out', { bot: persona.id, text })
+  if (!isTelegramChat(chat)) return
+  const bot = bridgeFor(persona.id)?.bot
+  if (!bot) return
+  for (let i = 0; i < text.length; i += 4000) {
+    await bot.api.sendMessage(chat, text.slice(i, i + 4000)).catch((e) => console.warn(`telegram send failed: ${e.message}`))
+  }
+}
+
+async function handleCommand(cmd: string, args: string, chat: string, reply: (s: string) => Promise<void>): Promise<void> {
+  if (cmd === 'mode') {
+    const [botId, mode] = args.split(/\s+/)
+    const p = personas.find((x) => x.id === botId)
+    if (!p || (mode !== 'ask' && mode !== 'auto')) return reply('usage: /mode <bot> ask|auto')
+    setPersonaMode(p, mode)
+    return reply(
+      mode === 'auto'
+        ? `${p.id} is now in AUTO mode. It will run gated actions without asking, except: ${p.policy.alwaysAsk.join(', ')}. Everything is still audited, budgets still apply, and /pause drops it back to Ask.`
+        : `${p.id} is back in ASK mode.`,
+    )
+  }
+  if (cmd === 'pause') {
+    paused = true
+    queue.denyAll('paused by the owner')
+    return reply('Paused: every bot is back to Ask, and pending approvals were denied.')
+  }
+  if (cmd === 'resume') {
+    paused = false
+    return reply('Resumed: bots use their own modes again.')
+  }
+  if (cmd === 'audit') {
+    const rows = db
+      .prepare('SELECT ts, bot, tool, decision, source, mode FROM audit_log ORDER BY id DESC LIMIT 15')
+      .all() as any[]
+    return reply(
+      rows.length
+        ? rows.map((r) => `${r.ts} ${r.bot} ${r.tool} → ${r.decision} (${r.source}, ${r.mode})`).join('\n')
+        : 'audit log is empty',
+    )
+  }
+  if (cmd === 'bots') {
+    return reply(
+      personas
+        .map((p) => `${p.id} — ${p.policy.mode}${paused ? ' (paused)' : ''}${tokens.get(p.id) ? ' · own identity' : ''}`)
+        .join('\n'),
+    )
+  }
+  if (cmd === 'routines') {
+    return reply(
+      personas.flatMap((p) => p.routines.map((r) => `${p.id}/${r.id} ${r.cron} ${r.enabled ? '' : '(disabled)'}`)).join('\n') ||
+        'no routines',
+    )
+  }
+  if (cmd === 'reload') {
+    personas = loadPersonas(botsDir)
+    syncBridges()
+    return reply(`reloaded ${personas.length} bot(s)`)
+  }
+  return reply('commands: /bots /mode <bot> ask|auto /pause /resume /audit /routines /reload')
+}
 
 const scheduler = new Scheduler(
   db,
@@ -280,7 +375,7 @@ const scheduler = new Scheduler(
     if (!chat) return
     const res = await runner.run(persona, chat, prompt, { scheduled: true })
     const body = res.skipped ? `(routine skipped: ${res.skipped})` : res.error ? `routine error: ${res.error.message}` : res.text
-    if (body) await bridge?.bot.api.sendMessage(chat, `[${persona.id}] ${body}`.slice(0, 4000))
+    if (body) await say(persona, chat, body)
   },
 )
 
@@ -293,34 +388,29 @@ function lastKnownChat(): string | undefined {
 // One turn, plus the handoff chain it may start. A bot ends its turn with
 // `@other: do X` to pass work along; every hop is visible in the thread and
 // counted against the per-task cap, so two bots cannot ping-pong forever.
-async function runTurn(
-  persona: Persona,
-  chat: string,
-  input: string,
-  reply: (s: string) => Promise<void>,
-  task: string,
-  depth = 0,
-): Promise<void> {
+async function runTurn(persona: Persona, chat: string, input: string, task: string): Promise<void> {
   chatFor.set(persona.id, chat)
   const res = await runner.run(persona, chat, input, {
     onEvent: (e) => {
       if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
     },
   })
-  for (const n of res.notices ?? []) await reply(n) // e.g. a provider switch
-  if (res.skipped) return reply(`(${persona.id} skipped: ${res.skipped})`)
-  if (res.error) return reply(`${persona.id} — ${res.error.kind}: ${res.error.hint ?? res.error.message}`)
-  await reply(res.text || '(no reply)')
-  if (res.memoryNotice) await reply(res.memoryNotice)
+  for (const n of res.notices ?? []) await say(persona, chat, n) // e.g. a provider switch
+  if (res.skipped) return say(persona, chat, `(skipped: ${res.skipped})`)
+  if (res.error) return say(persona, chat, `${res.error.kind}: ${res.error.hint ?? res.error.message}`)
+  await say(persona, chat, res.text || '(no reply)')
+  if (res.memoryNotice) await say(persona, chat, res.memoryNotice)
 
   const next = parseHandoff(res.text)
   if (!next) return
   const target = personas.find((p) => p.id.toLowerCase() === next.to.toLowerCase())
   if (!target || target.id === persona.id) return
   const gate = tryHandoff(db, { chat, task, from: persona.id, to: target.id, note: next.note })
-  if (!gate.ok) return reply(`↪︎ ${gate.reason}`)
-  await reply(`↪︎ ${persona.id} → ${target.id}`)
-  await runTurn(target, chat, `${persona.id} handed this to you: ${next.note}`, reply, task, depth + 1)
+  if (!gate.ok) return say(persona, chat, `↪︎ ${gate.reason}`)
+  await say(persona, chat, `↪︎ handing this to ${target.id}`)
+  // The receiving bot answers through its own bridge, so a handoff in a group
+  // chat reads as two bots talking rather than one bot narrating both sides.
+  await runTurn(target, chat, `${persona.id} handed this to you: ${next.note}`, task)
 }
 
 // A handoff is the last line of a reply: "@scout: check these three names".
@@ -334,7 +424,7 @@ function stripAddress(text: string, p: Persona): string {
   return text.replace(new RegExp(`(^|\\s)@?${p.id}\\b[:,]?`, 'i'), ' ').trim() || text
 }
 
-if (token && owners.count('telegram') === 0) {
+if (bridges.size && owners.count('telegram') === 0) {
   const code = owners.mintCode('telegram')
   console.log(`\nPAIRING CODE: ${code}\nDM this code to your bot on Telegram to claim it. Until then it answers nobody.\n`)
 }
@@ -346,7 +436,7 @@ const shutdown = async (code = 0) => {
   console.log('\nshutting down…')
   scheduler.stop()
   queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
-  await bridge?.bot.stop().catch(() => {})
+  await Promise.all([...bridges.values()].map((b) => b.bot.stop().catch(() => {})))
   await hook.close().catch(() => {})
   await api.close().catch(() => {})
   db.close()
@@ -359,21 +449,6 @@ process.on('SIGINT', () => void shutdown())
 process.on('SIGTERM', () => void shutdown())
 
 scheduler.start()
-try {
-  if (bridge) {
-    await bridge.bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`bridge live as @${me.username}`) })
-  } else {
-    // Desktop-only: nothing to poll, so just stay up until a signal.
-    await new Promise(() => {})
-  }
-} catch (err) {
-  const e = err as { error_code?: number; message: string }
-  console.error(
-    e.error_code === 401
-      ? 'Telegram rejected the token. Check TELEGRAM_BOT_TOKEN against what @BotFather gave you.'
-      : e.error_code === 409
-        ? 'Another process is already polling this bot token — stop the other daemon first.'
-        : `Telegram bridge failed: ${e.message}`,
-  )
-  await shutdown(1)
-}
+// Bridges poll on their own; the daemon stays up for the desktop app and the
+// scheduler until a signal arrives.
+await new Promise(() => {})

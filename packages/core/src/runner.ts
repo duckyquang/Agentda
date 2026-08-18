@@ -170,7 +170,7 @@ export class TurnRunner {
   // Built fresh each turn so bot dir, scope, and server path are always right —
   // no placeholder config for the user to hand-edit, and no stale paths.
   private materializeMcpConfig(persona: Persona, runDir: string): string | undefined {
-    const servers: Record<string, unknown> = { ...this.deps.mcpEntries?.(persona) }
+    const servers: Record<string, unknown> = { ...this.deps.mcpEntries?.(persona), ...persona.packServers }
     if (persona.mcpConfig && existsSync(persona.mcpConfig)) {
       const extra = JSON.parse(readFileSync(persona.mcpConfig, 'utf8'))
       Object.assign(servers, extra.mcpServers ?? {})

@@ -32,6 +32,17 @@ export {
 export { TurnRunner, type TurnResult } from './runner'
 export { Scheduler } from './scheduler'
 export { Owners } from './owners'
+export {
+  loadPack,
+  loadPacks,
+  missingEnv,
+  type Pack,
+  type PackGrants,
+  packGrants,
+  type PackServer,
+  refuseOnCodex,
+  withPacks,
+} from './packs'
 export { TokenStore } from './tokens'
 export {
   failoverNotice,

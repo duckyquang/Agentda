@@ -19,6 +19,7 @@ const persona = (routines: Persona['routines']): Persona => ({
   providers: [{ provider: 'claude' }],
   allowMeteredFailover: false,
   policy: { mode: 'ask', grants: [], autoApprove: [], alwaysAsk: [] },
+  packs: [],
   tools: [],
   agentdaTools: false,
   browser: false,

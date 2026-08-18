@@ -36,6 +36,8 @@ export interface ApiDeps {
   // Re-read the bot directories: the files are the truth, and people edit them
   // by hand while the daemon is up.
   reload: () => number
+  // Tool packs available to install on a bot, with what each still needs.
+  packs: () => { id: string; name: string; description: string; docs?: string; verified?: string; missing: string[]; outbound: string[] }[]
 }
 
 // What the browser server is told to do next. Frames flow one way; this is the
@@ -142,9 +144,15 @@ export class ControlApi {
           alwaysAsk: p.policy.alwaysAsk,
           dailyTurnCap: p.dailyTurnCap ?? null,
           weeklyTurnCap: p.weeklyTurnCap ?? null,
+          packs: p.packs,
+          packNotices: p.packNotices ?? [],
           routines: p.routines,
           ownIdentity: this.deps.tokenIds().includes(p.id),
         })
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/packs') {
+        return void json(200, { packs: this.deps.packs() })
       }
 
       // Routine history: at-most-once firing is only believable if you can see

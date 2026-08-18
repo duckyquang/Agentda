@@ -1,0 +1,13 @@
+id = "thinking"
+name = "Sequential thinking"
+description = "A scratchpad for working a hard problem in steps. Touches nothing, so it is auto-approved."
+docs = "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking"
+verified = "2026-08-18: launched with npx, tools/list matched the classification below"
+
+[[servers]]
+name = "thinking"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+env_required = []
+read_only = ["sequentialthinking"]
+outbound = []

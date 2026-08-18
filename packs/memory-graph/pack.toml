@@ -1,0 +1,13 @@
+id = "memory-graph"
+name = "Knowledge graph memory"
+description = "Structured memory as entities and relations, for bots that track people, projects, and how they connect. Agentda's own memory stays what it is: Markdown you can read."
+docs = "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
+verified = "2026-08-18: launched with npx, tools/list matched the classification below"
+
+[[servers]]
+name = "graph"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-memory"]
+env_required = []
+read_only = ["read_graph", "search_nodes", "open_nodes"]
+outbound = []

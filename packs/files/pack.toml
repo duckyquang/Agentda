@@ -1,0 +1,29 @@
+id = "files"
+name = "Files"
+description = "Read and edit files in the directories this bot is scoped to, through the reference filesystem server."
+docs = "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+verified = "2026-08-18: launched with npx, tools/list matched the classification below"
+
+[[servers]]
+name = "files"
+command = "npx"
+# {scope} expands to the bot's own scope directories, so this pack needs no
+# per-bot editing. A bot with no scope gets a server that can reach nothing,
+# which is the right failure.
+args = ["-y", "@modelcontextprotocol/server-filesystem", "{scope}"]
+env_required = []
+read_only = [
+  "read_file",
+  "read_text_file",
+  "read_media_file",
+  "read_multiple_files",
+  "list_directory",
+  "list_directory_with_sizes",
+  "directory_tree",
+  "search_files",
+  "get_file_info",
+  "list_allowed_directories",
+]
+# Nothing here leaves the machine, so nothing is outbound — but the writes are
+# absent from read_only on purpose, which is what keeps them gated.
+outbound = []

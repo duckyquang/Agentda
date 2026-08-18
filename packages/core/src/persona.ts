@@ -23,6 +23,11 @@ export interface Persona {
   browserSurface: 'shadow' | 'on-screen'
   scope: string[] // directories the file tools may touch, absolute
   mcpConfig?: string // extra MCP config file, relative to the bot dir
+  packs: string[] // tool pack ids this bot uses (PLAN Phase 3)
+  // Filled in by withPacks(): the servers those packs resolve to, and anything
+  // the user needs to hear about them.
+  packServers?: Record<string, { command: string; args: string[]; env?: Record<string, string> }>
+  packNotices?: string[]
   routines: { id: string; cron: string; prompt: string; enabled: boolean }[]
   quietHours?: { start: number; end: number } // local hours, [start, end)
   dailyTurnCap?: number
@@ -103,6 +108,7 @@ export function loadPersona(dir: string): Persona {
     browserSurface: cfg.browser_surface === 'on-screen' ? 'on-screen' : 'shadow',
     scope: asStringArray(cfg.scope).map((p) => (p.startsWith('~') ? join(homedir(), p.slice(1)) : resolve(p))),
     mcpConfig: typeof cfg.mcp_config === 'string' ? join(dir, cfg.mcp_config) : undefined,
+    packs: asStringArray(cfg.packs),
     routines: Array.isArray(cfg.routines)
       ? cfg.routines.map((r: any, i: number) => ({
           id: String(r.id ?? `r${i}`),
@@ -189,6 +195,7 @@ export interface PersonaPatch {
   alwaysAsk?: string[]
   dailyTurnCap?: number | null
   weeklyTurnCap?: number | null
+  packs?: string[]
   prompt?: string
 }
 
@@ -238,6 +245,7 @@ const PATCH_KEYS: Record<keyof PersonaPatch, string> = {
   alwaysAsk: 'always_ask',
   dailyTurnCap: 'daily_turn_cap',
   weeklyTurnCap: 'weekly_turn_cap',
+  packs: 'packs',
   prompt: 'prompt', // handled separately: prompt.md, not a config key
 }
 

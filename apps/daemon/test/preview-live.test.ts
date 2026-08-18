@@ -33,6 +33,7 @@ const persona = (id: string, dir: string): Persona => ({
   browserSurface: 'shadow',
   scope: [],
   routines: [],
+  packs: [],
 })
 
 async function harness() {
@@ -57,6 +58,7 @@ async function harness() {
     clearToken: () => {},
     tokenIds: () => [],
     reload: () => 1,
+    packs: () => [],
   })
   await api.listen(0)
 

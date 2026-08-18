@@ -72,6 +72,8 @@
   .editor label { display: grid; gap: 4px; font-size: 13px; color: var(--dim); }
   .editor .inline { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
   .editor .inline label { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
+  .packrow { display: flex; flex-direction: row; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
+  .packrow:last-of-type { border-bottom: 0; }
   fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
   legend { color: var(--dim); font-size: 12px; padding: 0 6px; }
   .hint { color: var(--dim); font-size: 12px; }
@@ -333,9 +335,11 @@ async function browserControl(control) {
 // ---- persona editor -------------------------------------------------------
 
 const PROVIDERS = ['claude', 'codex', 'anthropic-api', 'openai-api', 'xai-api', 'gemini-api', 'ollama']
+let packs = []
 
 async function loadDetail() {
   detail = current ? await api(`/api/bots/${encodeURIComponent(current)}`) : null
+  if (!packs.length) packs = (await api('/api/packs')).packs || []
 }
 
 function renderSettings() {
@@ -368,6 +372,22 @@ function renderSettings() {
           <option value="on-screen"${d.browserSurface === 'on-screen' ? ' selected' : ''}>On screen — a visible window you can watch</option>
         </select></label>
       <label>Directories it may touch (comma separated)<input type="text" id="e-scope" value="${esc(list(d.scope))}" /></label>
+    </fieldset>
+
+    <fieldset><legend>Tool packs</legend>
+      ${packs.length ? packs.map((p) => `<label class="packrow" style="align-items:flex-start">
+        <input type="checkbox" data-pack="${esc(p.id)}" ${(d.packs || []).includes(p.id) ? 'checked' : ''}
+          ${p.missing.length ? 'disabled' : ''} />
+        <span><b>${esc(p.name)}</b> — ${esc(p.description)}
+          <div class="hint">${p.missing.length
+            ? `needs ${p.missing.map(esc).join(', ')} in the environment before it can be turned on`
+            : p.verified ? `vetted by running it — ${esc(p.verified)}` : 'not yet run against a real server'}${
+            p.outbound.length ? ` · sends: ${p.outbound.map(esc).join(', ')} (always gated)` : ''}</div></span>
+      </label>`).join('') : '<div class="hint">No packs installed.</div>'}
+      ${(d.packNotices || []).map((n) => `<div class="hint" style="color:var(--no)">${esc(n)}</div>`).join('')}
+      ${d.providers[0] === 'codex'
+        ? '<div class="hint" style="color:var(--no)">This bot runs on Codex, which cannot run MCP tools at all — packs are refused rather than half-attached (ADR 0003).</div>'
+        : ''}
     </fieldset>
 
     <fieldset><legend>Gate</legend>
@@ -416,6 +436,7 @@ function renderSettings() {
       alwaysAsk: csv('e-always'),
       dailyTurnCap: num('e-daily'),
       weeklyTurnCap: num('e-weekly'),
+      packs: [...document.querySelectorAll('[data-pack]')].filter((c) => c.checked).map((c) => c.dataset.pack),
     }) })
     if (r.error) return alert(r.error)
     await refresh()

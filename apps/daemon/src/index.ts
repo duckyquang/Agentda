@@ -16,12 +16,15 @@ import {
   Scheduler,
   SessionStore,
   tryHandoff,
+  loadPacks,
+  missingEnv,
   setPersonaMode,
   TokenStore,
   updatePersona,
   transcribe,
   TurnRunner,
   voiceConfigFromEnv,
+  withPacks,
 } from '@agentda/core'
 import { ClaudeAdapter } from '@agentda/provider-claude'
 import { CodexAdapter } from '@agentda/provider-codex'
@@ -39,8 +42,24 @@ const owners = new Owners(db)
 // copied and shared, a token is a password.
 const tokens = new TokenStore(join(home, 'telegram.json'))
 const botsDir = process.env.AGENTDA_BOTS ?? join(home, 'bots')
+const repoRoot = fileURLToPath(new URL('../../..', import.meta.url))
 
-let personas = loadPersonas(botsDir)
+// Packs ship with the repo and can be added per user; a user copy of the same
+// id wins.
+const packDirs = [join(repoRoot, 'packs'), join(home, 'packs')]
+
+// Bots are always loaded with their packs attached, so nothing downstream has
+// to remember to do it.
+const readPersonas = () => {
+  const packs = loadPacks(...packDirs)
+  return loadPersonas(botsDir).map((p) => {
+    const withThem = withPacks(p, packs)
+    for (const n of withThem.packNotices ?? []) console.warn(`${p.id}: ${n}`)
+    return withThem
+  })
+}
+
+let personas = readPersonas()
 if (!personas.length) {
   console.error(`no bots found in ${botsDir} — create one with a bot.toml (see docs/quickstart.md)`)
   process.exit(1)
@@ -102,7 +121,6 @@ console.log(`gate listening on 127.0.0.1:${port}`)
 
 // The MCP server runs as a stdio child of the CLI. Spawned through tsx so it
 // runs from source like the rest of the workspace (no build step yet).
-const repoRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const mcpServerEntry = join(repoRoot, 'packages/mcp-agentda/src/index.ts')
 const tsxLoader = join(repoRoot, 'node_modules/tsx/dist/cli.mjs')
 const runner = new TurnRunner({
@@ -220,7 +238,7 @@ const api = new ControlApi({
   isPaused: () => paused,
   createBot: (spec) => {
     const p = createPersona(botsDir, spec)
-    personas = loadPersonas(botsDir)
+    personas = readPersonas()
     api.emit('bots', { changed: p.id })
     return p
   },
@@ -228,7 +246,7 @@ const api = new ControlApi({
     const p = personas.find((x) => x.id === botId)
     if (!p) throw new Error(`no bot named ${botId}`)
     const next = updatePersona(p, patch)
-    personas = loadPersonas(botsDir)
+    personas = readPersonas()
     api.emit('bots', { changed: botId })
     return next
   },
@@ -237,7 +255,7 @@ const api = new ControlApi({
     if (!p) throw new Error(`no bot named ${botId}`)
     const dest = archivePersona(botsDir, p)
     tokens.remove(botId)
-    personas = loadPersonas(botsDir)
+    personas = readPersonas()
     syncBridges()
     api.emit('bots', { changed: botId })
     return dest
@@ -254,8 +272,20 @@ const api = new ControlApi({
     api.emit('bots', { changed: botId })
   },
   tokenIds: () => tokens.ids(),
+  packs: () => {
+    const packs = loadPacks(...packDirs)
+    return packs.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      docs: p.docs,
+      verified: p.verified,
+      missing: missingEnv(p),
+      outbound: p.servers.flatMap((s) => s.outbound),
+    }))
+  },
   reload: () => {
-    personas = loadPersonas(botsDir)
+    personas = readPersonas()
     syncBridges()
     api.emit('bots', { changed: null })
     return personas.length
@@ -486,7 +516,7 @@ async function handleCommand(cmd: string, args: string, chat: string, reply: (s:
     )
   }
   if (cmd === 'reload') {
-    personas = loadPersonas(botsDir)
+    personas = readPersonas()
     syncBridges()
     return reply(`reloaded ${personas.length} bot(s)`)
   }

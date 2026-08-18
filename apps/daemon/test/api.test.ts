@@ -25,6 +25,7 @@ const persona = (id: string): Persona => ({
   browserSurface: 'shadow',
   scope: [],
   routines: [],
+  packs: [],
 })
 
 let n = 0
@@ -49,6 +50,7 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
     clearToken: () => {},
     tokenIds: () => [],
     reload: () => 1,
+    packs: () => [],
     ...over,
   }
   const api = new ControlApi(deps)

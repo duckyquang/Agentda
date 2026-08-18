@@ -85,11 +85,11 @@ The API-key rows matter for anyone running bots hard enough to hit plan windows,
 
 | Interface | Notes | Status |
 |---|---|---|
-| Telegram | long polling, inline-keyboard approvals, owner pairing; voice notes arrive in Phase 2 | **built** — needs your token for a live run |
-| Desktop app | daemon dashboard: bot roster, chat, approval queue, audit log, config | planned (Phase 2) |
-| Slack | Socket Mode, so no public URL; workspace-scoped, best for work bots | planned (Phase 3) |
-| Discord | good buttons; bots can only DM users who share a server, so onboarding runs through a small private guild | planned (Phase 3) |
-| WhatsApp | would be official Cloud API only (no Baileys: linked-number bans are real); business verification and webhook infra fight our local-first design | decision deferred, default skip — see PLAN.md Phase 3 ADR |
+| Desktop app | bot roster, chat with a live checklist, approvals inbox, audit log with filters, routine history, persona editor, bot-screen preview with take-over, mic | **working**, live-verified |
+| Telegram | long polling, inline-keyboard approvals, owner pairing, voice notes, one BotFather identity per bot | **built** — needs your token for a live run |
+| Slack | Socket Mode, so no public URL; [app manifest](examples/slack/app-manifest.yaml) checked in | **built** — needs a workspace for a live run |
+| Discord | gateway + buttons; bots can only DM users who share a server, so onboarding runs through a small private guild | **built** — needs a bot token for a live run |
+| WhatsApp | official Cloud API only (no Baileys: linked-number bans are real); business verification, a public webhook, and pre-approved templates all fight our local-first design | **parked**, with the reasoning in [ADR 0005](docs/adr/0005-whatsapp.md) |
 | Mobile | native app in Phase 5; until then Telegram is the mobile client, and honestly a good one | Phase 5 |
 
 ## Example bot personas
@@ -106,11 +106,13 @@ Each of these is a persona folder: prompt, tools, routines, gates. The daemon do
 
 ## Project status
 
-Alpha. Phase 0 and Phase 1 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, and a Telegram bridge with owner pairing.
+Alpha, and Phases 0 through 3 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, a second and third provider with failover, the desktop app, three chat bridges on one shared set of rules, and tool packs.
 
-Verified against the real `claude` CLI (`pnpm test:live` — 57 tests, all green): gated actions block and only run on approval, denials stop the action, unanswered approvals time out to deny, Auto mode runs unattended while the always-ask list still blocks, memory survives a restart, a bot browses a real page with zero windows on screen, and two bots complete a task with a visible handoff and stop at the cap.
+What has actually been run, and when, is written down rather than implied. Against the real `claude` CLI on 2026-08-13: gated actions block and only run on approval, denials stop the action, unanswered approvals time out to deny, Auto mode runs unattended while the always-ask list still blocks, memory survives a restart, a bot browses a real page with zero windows on screen, and two bots complete a task with a visible handoff and stop at the cap. Against a local Ollama model and real Chromium on 2026-08-18: an approval card streams to the desktop with its payload and runs only once approved, a typed amendment comes back as a revised card with the corrected payload, screencast frames reach the window and take-over refuses the bot the page, and every shipped tool pack was launched and checked against what it actually exposes.
 
-Two things still need credentials to prove end to end: a live Telegram run (needs a BotFather token) and the email recipe (needs a mailbox). Both are built and unit-tested; neither has been run against the real service — see [USER_REQUEST.md](USER_REQUEST.md) for the two short setup guides. Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Roughly: Phase 0 proves the Claude Code adapter headless; Phase 1 is the MVP — daemon, Telegram bridge, real starter tools, Ask/Auto modes, browser hands (shadow surface by default, on-screen optional), multi-bot handoffs, and the approval queue with its audit log; Phase 2 adds the Codex adapter, API-key providers, voice, and the desktop app with the live bot-screen preview; later phases add more bridges, full desktop hands on an isolated virtual desktop, and mobile.
+What is built but has never met the real service says so, in [PLAN.md](PLAN.md) and in [USER_REQUEST.md](USER_REQUEST.md): a live Telegram run, the email recipe, Slack, Discord, voice transcription on real audio, and the hosted API providers. Each needs one credential or one install, and none of them blocks anything else.
+
+Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Phase 4 is next: full desktop hands on an isolated virtual desktop, and watch-and-learn.
 
 ## Quickstart
 
@@ -124,9 +126,14 @@ pnpm canary                       # one cheap turn: login works, bot turns are i
 mkdir -p ~/.agentda
 cp -r examples/bots ~/.agentda/bots
 
-export TELEGRAM_BOT_TOKEN=...     # from @BotFather
-pnpm daemon                       # prints a pairing code — DM it to your bot
+pnpm daemon                       # prints a URL for the desktop UI
 ```
+
+No token needed to start: the daemon runs desktop-only and prints a URL you can open in any
+browser, or `pnpm --filter @agentda/desktop dev` opens it as a window. Add
+`TELEGRAM_BOT_TOKEN` (from @BotFather), `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`, or
+`DISCORD_BOT_TOKEN` to reach your bots from chat; the daemon prints a pairing code you send
+once, so only you can talk to them or answer approvals.
 
 Until you pair, the bot answers nobody: Telegram usernames are public, and "a human approved" has to mean you.
 

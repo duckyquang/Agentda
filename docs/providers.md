@@ -15,6 +15,7 @@ verified 2026-08-13 against `claude` 2.1.206, `codex-cli` 0.146.1, and a local O
 | Mid-turn approval | yes, hook blocks the call | **no — see below** | yes, in-process | yes, in-process |
 | Session resume | yes | yes | no (context rebuilt each turn) | no |
 | Streaming text | yes | whole message per turn | whole message per turn | whole message per turn |
+| Tool packs | yes | **refused, loudly** (see below) | yes | yes |
 | Status | shipped | shipped, read-only | shipped, unverified against real keys | shipped, live-verified |
 
 ## Why Codex bots are read-only
@@ -38,6 +39,13 @@ that might lose. Verified to refuse a write even when the human approves it.
 That still leaves Codex genuinely useful — conversation, reasoning, reading its memory and
 workspace, thread resume — and it is a real second provider for the policy hedge. It just
 doesn't get hands.
+
+This is also why [tool packs](packs.md) are refused on Codex rather than filtered. A pack
+that looked attached and silently never ran would be worse than one never offered, and an
+outbound verb in that state is precisely the failure PRD M4 calls a release blocker. It is
+the same reason the "approval proxy for outbound-verb servers on Codex" that Phase 3 planned
+does not exist: the proxy would itself be an MCP server, so it would be cancelled exactly
+like the calls it was there to gate.
 
 If upstream fixes both issues, Codex gains write tools by changing a default and deleting a
 restriction. The hook plumbing, the queue, and the audit path are already shared with Claude.

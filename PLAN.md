@@ -161,16 +161,21 @@ Phase 2 started 2026-08-13 without waiting on either: nothing in it depends on T
 - Multi-bot polish: the coordinator pattern (PRD FR-38) — a planner bot decomposing and dispatching to specialists — evaluated now that Phase 1's simple handoffs have real usage behind them, always behind the existing per-task turn caps.
 
 **Task checklist.**
-- [ ] Bridge abstraction with sender auth and live-edit checklist rendering in core; Telegram migrated onto it.
-- [ ] Slack bridge, approval flow, and onboarding docs with the app manifest checked into the repo.
-- [ ] Discord bridge, approval flow, and private-guild onboarding docs.
-- [ ] WhatsApp ADR with the cost and ToS table, then park it.
-- [ ] Tool pack format (name, servers, required env and auth, permission defaults, outbound-verb classification), the first three packs, and a pack setup wizard in the desktop app. Each pack is vetted by actually running it before it lands.
-- [ ] Agentda approval proxy for outbound-verb servers on Codex.
-- [ ] Ollama adapter on the shared loop.
-- [ ] Coordinator-pattern spike behind the Phase 1 turn caps; adopt or park with an ADR.
+- [x] Bridge abstraction in core: sender authentication, pairing, addressing, typed answers to approval cards, and the edit-in-place checklist are one implementation that all three platforms run, so the FR-18 parity contract is a shared code path rather than three copies that drift. Telegram migrated onto it. The checklist had a real race — two updates in flight both posted a message — which is fixed and tested.
+- [x] [Slack bridge](docs/slack.md) on Bolt in Socket Mode, Block Kit approve/deny inside the 3-second ack window, `chat.update` for the live checklist, with the [app manifest](examples/slack/app-manifest.yaml) checked in. Never run against a real workspace — see [USER_REQUEST.md](USER_REQUEST.md).
+- [x] [Discord bridge](docs/discord.md) on discord.js over the gateway, `deferUpdate` then edit, private-guild onboarding documented. Never run against a real bot token — see [USER_REQUEST.md](USER_REQUEST.md).
+- [x] [ADR 0005](docs/adr/0005-whatsapp.md): WhatsApp parked. Business verification, a dedicated number, a public webhook, and Meta-approved templates for anything outside the 24-hour window — which a bot that says arbitrary things at arbitrary times cannot use. The unofficial route risks a permanent ban on someone's real phone number, so it stays out of the repo entirely, examples included.
+- [x] [Tool packs](docs/packs.md): format, three packs, and a wizard in the persona editor. Read-only verbs become the auto-approve list and everything else is gated, so a pack that forgets to classify a verb fails closed. Each shipped pack is vetted by launching it and comparing its real tool list against the classification — `files`, `memory-graph` and `thinking` all verified 2026-08-18 that way. Gmail, Sheets and Calendar are deliberately absent: they need OAuth credentials nobody here has, and the rule is that a pack lands after it has been run.
+- [x] Approval proxy for outbound-verb servers on Codex — **not built, and the reason is the point**: the proxy would itself be an MCP server, so `codex exec` would cancel it like every other MCP call (ADR 0003). What it was there to guarantee is guaranteed instead by refusing to attach packs on Codex at all, loudly, rather than half-attaching them.
+- [x] Ollama on the shared agent loop — shipped in Phase 2 and live-verified there; it is the provider every live run in this phase used.
+- [x] Coordinator-pattern spike ([ADR 0006](docs/adr/0006-coordinator-pattern.md)): built, run four times against a local model, and **parked on by default**. The plumbing worked every time and the cap stopped it when spent, but the local planner produced a malformed plan in three runs of four, which degrades the pattern into the Phase 1 chain at the cost of an extra turn. It ships behind `coordinator = true`, off, documented as unproven rather than as a feature.
 
-**Exit criteria.** One persona is reachable from Telegram, Slack, and Discord with identical approve/deny behavior, identical mode badges, and identical sender authentication. A bot reads Gmail through a pack and asks approval before sending mail — including on a Codex-backed bot through the proxy.
+**Exit criteria.** Status as of 2026-08-18. Live results are from real Ollama (`llama3.1:8b`) runs and real MCP servers launched from npm on macOS.
+
+- ✅ one persona is reachable from Telegram, Slack, and Discord with identical approve/deny behaviour, identical mode badges, and identical sender authentication — *identical* because it is one implementation in core, tested directly, rather than three that agree today. The Slack and Discord SDK wiring on top of it has not met a real workspace or bot token: ⏳ tracked in [USER_REQUEST.md](USER_REQUEST.md).
+- ✅ a pack's read-only verbs run unasked and everything else is gated, with each shipped pack vetted by running it — live.
+- ⏳ **a bot reads Gmail through a pack and asks approval before sending mail** needs Google OAuth credentials. The pack is not written, because a pack lands after it has been run.
+- ✅ the Codex half of that criterion is settled rather than pending: packs are refused on Codex, because a proxy would be cancelled exactly like the calls it was proxying (ADR 0003), and a send tool that looks attached and runs ungated is the PRD M4 blocker.
 
 **Riskiest assumption.** Third-party MCP server quality. The packs stand on maintained community servers we don't control; each one is vetted by running it, and the outbound-verb proxy on Codex is the safety net when a server's tool surface is broader than its README admits.
 

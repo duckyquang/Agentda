@@ -24,6 +24,10 @@ export interface Persona {
   scope: string[] // directories the file tools may touch, absolute
   mcpConfig?: string // extra MCP config file, relative to the bot dir
   packs: string[] // tool pack ids this bot uses (PLAN Phase 3)
+  // A coordinator may hand work to several bots in one turn and then gets a
+  // last turn to make sense of what came back (FR-38). Every hop still counts
+  // against the same per-task cap.
+  coordinator: boolean
   // Filled in by withPacks(): the servers those packs resolve to, and anything
   // the user needs to hear about them.
   packServers?: Record<string, { command: string; args: string[]; env?: Record<string, string> }>
@@ -109,6 +113,7 @@ export function loadPersona(dir: string): Persona {
     scope: asStringArray(cfg.scope).map((p) => (p.startsWith('~') ? join(homedir(), p.slice(1)) : resolve(p))),
     mcpConfig: typeof cfg.mcp_config === 'string' ? join(dir, cfg.mcp_config) : undefined,
     packs: asStringArray(cfg.packs),
+    coordinator: cfg.coordinator === true,
     routines: Array.isArray(cfg.routines)
       ? cfg.routines.map((r: any, i: number) => ({
           id: String(r.id ?? `r${i}`),

@@ -55,6 +55,7 @@ const persona = (over: Partial<Persona> = {}): Persona =>
     scope: ['/tmp/work'],
     routines: [],
     packs: [],
+  coordinator: false,
     ...over,
   }) as Persona
 

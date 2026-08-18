@@ -38,3 +38,20 @@ export function tryHandoff(db: Db, h: Handoff, cap = DEFAULT_HANDOFF_CAP): { ok:
   recordHandoff(db, h)
   return { ok: true }
 }
+
+// Handoffs are the trailing lines of a reply: "@scout: check these names".
+// One line is the Phase 1 chain; several is the coordinator pattern (FR-38),
+// where a planner splits work across specialists in a single turn. Parsing
+// stops at the first line that is not a handoff, so a bot cannot smuggle one
+// into the middle of its prose.
+export function parseHandoffs(text: string): { to: string; note: string }[] {
+  const lines = text.trim().split('\n').filter((l) => l.trim())
+  const found: { to: string; note: string }[] = []
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^@([\w-]+)\s*[::]\s*(.+)$/.exec(lines[i].trim())
+    if (!m) break
+    found.unshift({ to: m[1], note: m[2] })
+  }
+  return found
+}
+

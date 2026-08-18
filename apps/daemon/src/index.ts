@@ -6,23 +6,24 @@ import {
   ApprovalQueue,
   type ApprovalRequest,
   archivePersona,
-  type LiveChecklist,
   createPersona,
   HookServer,
+  type LiveChecklist,
+  loadPacks,
   loadPersonas,
+  missingEnv,
   openDb,
   Owners,
+  parseHandoffs,
   type Persona,
   Scheduler,
   SessionStore,
-  tryHandoff,
-  loadPacks,
-  missingEnv,
   setPersonaMode,
   TokenStore,
-  updatePersona,
   transcribe,
+  tryHandoff,
   TurnRunner,
+  updatePersona,
   voiceConfigFromEnv,
   withPacks,
 } from '@agentda/core'
@@ -542,7 +543,7 @@ function lastKnownChat(): string | undefined {
 // One turn, plus the handoff chain it may start. A bot ends its turn with
 // `@other: do X` to pass work along; every hop is visible in the thread and
 // counted against the per-task cap, so two bots cannot ping-pong forever.
-async function runTurn(persona: Persona, chat: string, input: string, task: string): Promise<void> {
+async function runTurn(persona: Persona, chat: string, input: string, task: string, opts: { silent?: boolean } = {}): Promise<string> {
   chatFor.set(persona.id, chat)
   // The desktop renders a live checklist off these, so they are emitted as the
   // turn happens rather than summarised at the end. Chat gets the same thing as
@@ -570,28 +571,69 @@ async function runTurn(persona: Persona, chat: string, input: string, task: stri
       await list?.finish()
     })
   for (const n of res.notices ?? []) await say(persona, chat, n) // e.g. a provider switch
-  if (res.skipped) return say(persona, chat, `(skipped: ${res.skipped})`)
-  if (res.error) return say(persona, chat, `${res.error.kind}: ${res.error.hint ?? res.error.message}`)
+  if (res.skipped) {
+    await say(persona, chat, `(skipped: ${res.skipped})`)
+    return ''
+  }
+  if (res.error) {
+    await say(persona, chat, `${res.error.kind}: ${res.error.hint ?? res.error.message}`)
+    return ''
+  }
   await say(persona, chat, res.text || '(no reply)')
   if (res.memoryNotice) await say(persona, chat, res.memoryNotice)
+  // The synthesis turn has already had its say; letting it dispatch again is
+  // how a coordinator becomes a loop.
+  if (opts.silent) return res.text
 
-  const next = parseHandoff(res.text)
-  if (!next) return
-  const target = personas.find((p) => p.id.toLowerCase() === next.to.toLowerCase())
-  if (!target || target.id === persona.id) return
-  const gate = tryHandoff(db, { chat, task, from: persona.id, to: target.id, note: next.note })
-  if (!gate.ok) return say(persona, chat, `↪︎ ${gate.reason}`)
-  await say(persona, chat, `↪︎ handing this to ${target.id}`)
-  // The receiving bot answers through its own bridge, so a handoff in a group
-  // chat reads as two bots talking rather than one bot narrating both sides.
-  await runTurn(target, chat, `${persona.id} handed this to you: ${next.note}`, task)
+  await dispatchHandoffs(persona, chat, res.text, task)
+  return res.text
 }
 
-// A handoff is the last line of a reply: "@scout: check these three names".
-function parseHandoff(text: string): { to: string; note: string } | undefined {
-  const line = text.trim().split('\n').filter(Boolean).pop() ?? ''
-  const m = /^@([\w-]+)\s*[::]\s*(.+)$/.exec(line.trim())
-  return m ? { to: m[1], note: m[2] } : undefined
+// Where a reply's trailing `@bot: note` lines go. One line is the Phase 1
+// chain: the next bot picks the work up and may pass it on again. A
+// coordinator may name several, and gets one last turn to make sense of what
+// came back (FR-38). Either way every hop is recorded and counted against the
+// same per-task cap, because two models passing work back and forth is the
+// fastest way to burn a plan window.
+async function dispatchHandoffs(persona: Persona, chat: string, text: string, task: string): Promise<void> {
+  const all = parseHandoffs(text)
+  // Only the trailing lines count, so nothing can smuggle a handoff into the
+  // middle of a reply. Planners do produce stray ones though — say so instead
+  // of quietly acting on half a plan.
+  const looksLikeHandoff = text.split('\n').filter((l) => /^@[\w-]+\s*[::]\s*.+$/.test(l.trim())).length
+  if (looksLikeHandoff > all.length) {
+    await say(persona, chat, `↪︎ ignored ${looksLikeHandoff - all.length} handoff line(s) that weren't at the end of the message`)
+  }
+  if (!all.length) return
+  const targets = (persona.coordinator ? all : all.slice(-1))
+    .map((h) => ({ ...h, persona: personas.find((p) => p.id.toLowerCase() === h.to.toLowerCase()) }))
+    .filter((h) => h.persona && h.persona.id !== persona.id)
+  if (!targets.length) return
+
+  const results: string[] = []
+  for (const t of targets) {
+    const gate = tryHandoff(db, { chat, task, from: persona.id, to: t.persona!.id, note: t.note })
+    if (!gate.ok) {
+      await say(persona, chat, `↪︎ ${gate.reason}`)
+      break
+    }
+    await say(persona, chat, `↪︎ handing this to ${t.persona!.id}`)
+    // The receiving bot answers through its own bridge, so a handoff in a
+    // group chat reads as two bots talking rather than one narrating both.
+    const answer = await runTurn(t.persona!, chat, `${persona.id} handed this to you: ${t.note}`, task)
+    if (answer) results.push(`${t.persona!.id}: ${answer}`)
+  }
+
+  // Only a coordinator gets the last word. Giving every bot one would make any
+  // two of them a loop with extra steps.
+  if (!persona.coordinator || results.length < 2) return
+  await runTurn(
+    persona,
+    chat,
+    `Here is what you got back. Answer the original request using it, and do not hand this to anyone else.\n\n${results.join('\n\n')}`,
+    task,
+    { silent: true },
+  )
 }
 
 function stripAddress(text: string, p: Persona): string {

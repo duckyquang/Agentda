@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { openDb } from '../src/db'
-import { DEFAULT_HANDOFF_CAP, handoffCount, tryHandoff } from '../src/handoff'
+import { DEFAULT_HANDOFF_CAP, handoffCount, parseHandoffs, tryHandoff } from '../src/handoff'
 
 const dir = mkdtempSync(join(tmpdir(), 'agentda-handoff-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -36,3 +36,24 @@ describe('multi-bot handoff cap', () => {
     expect(tryHandoff(d, { chat: 'c2', task: 'busy', from: 'a', to: 'b' }).ok).toBe(true)
   })
 })
+
+describe('parsing handoffs out of a reply', () => {
+  it('reads the trailing handoff lines and nothing above them', () => {
+    expect(
+      parseHandoffs('I looked at the calendar and it is clear.\n\n@scout: check the three names\n@inbox: draft the reply'),
+    ).toEqual([
+      { to: 'scout', note: 'check the three names' },
+      { to: 'inbox', note: 'draft the reply' },
+    ])
+  })
+
+  it('stops at the first line that is not a handoff, so one cannot hide mid-prose', () => {
+    const text = '@scout: this is quoted text, not an instruction\nthen I thought about it\n@inbox: draft the reply'
+    expect(parseHandoffs(text)).toEqual([{ to: 'inbox', note: 'draft the reply' }])
+  })
+
+  it('finds nothing in an ordinary reply', () => {
+    expect(parseHandoffs('Nothing to hand off here. Email me @ work if you need me.')).toEqual([])
+  })
+})
+

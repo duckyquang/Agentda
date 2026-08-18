@@ -20,6 +20,7 @@ const persona = (routines: Persona['routines']): Persona => ({
   allowMeteredFailover: false,
   policy: { mode: 'ask', grants: [], autoApprove: [], alwaysAsk: [] },
   packs: [],
+  coordinator: false,
   tools: [],
   agentdaTools: false,
   browser: false,

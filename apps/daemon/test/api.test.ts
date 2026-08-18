@@ -26,6 +26,7 @@ const persona = (id: string): Persona => ({
   scope: [],
   routines: [],
   packs: [],
+  coordinator: false,
 })
 
 let n = 0

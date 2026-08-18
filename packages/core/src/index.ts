@@ -51,7 +51,7 @@ export {
   type ProviderChoice,
   shouldFailover,
 } from './failover'
-export { DEFAULT_HANDOFF_CAP, type Handoff, handoffCount, recordHandoff, tryHandoff } from './handoff'
+export { DEFAULT_HANDOFF_CAP, type Handoff, handoffCount, parseHandoffs, recordHandoff, tryHandoff } from './handoff'
 
 // Normalized events every provider adapter emits. Kept exactly as big as the
 // Claude adapter needs (PLAN Phase 0); grows only when a second adapter demands it.

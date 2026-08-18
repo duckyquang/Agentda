@@ -34,6 +34,7 @@ const persona = (id: string, dir: string): Persona => ({
   scope: [],
   routines: [],
   packs: [],
+  coordinator: false,
 })
 
 async function harness() {

@@ -170,7 +170,7 @@ Phase 2 started 2026-08-13 without waiting on either: nothing in it depends on T
 - [x] Ollama on the shared agent loop — shipped in Phase 2 and live-verified there; it is the provider every live run in this phase used.
 - [x] Coordinator-pattern spike ([ADR 0006](docs/adr/0006-coordinator-pattern.md)): built, run four times against a local model, and **parked on by default**. The plumbing worked every time and the cap stopped it when spent, but the local planner produced a malformed plan in three runs of four, which degrades the pattern into the Phase 1 chain at the cost of an extra turn. It ships behind `coordinator = true`, off, documented as unproven rather than as a feature.
 
-**Exit criteria.** Status as of 2026-08-18. Live results are from real Ollama (`llama3.1:8b`) runs and real MCP servers launched from npm on macOS.
+**Exit criteria.** Status as of 2026-08-18. Live results are from real Ollama (`llama3.1:8b`) runs, real Chromium, and real MCP servers launched from npm on macOS — `AGENTDA_LIVE=1 pnpm test:live`, 150 passing and 13 skipped, the skips being every suite that needs the `claude` or `codex` binary, neither of which is installed on this machine.
 
 - ✅ one persona is reachable from Telegram, Slack, and Discord with identical approve/deny behaviour, identical mode badges, and identical sender authentication — *identical* because it is one implementation in core, tested directly, rather than three that agree today. The Slack and Discord SDK wiring on top of it has not met a real workspace or bot token: ⏳ tracked in [USER_REQUEST.md](USER_REQUEST.md).
 - ✅ a pack's read-only verbs run unasked and everything else is gated, with each shipped pack vetted by running it — live.

@@ -6,6 +6,8 @@
     "@agentda/core": "workspace:*",
     "@agentda/provider-claude": "workspace:*",
     "grammy": "^1.32.0",
+    "@slack/bolt": "^4.2.0",
+    "discord.js": "^14.18.0",
     "@agentda/provider-codex": "workspace:*",
     "@agentda/provider-api": "workspace:*"
   },

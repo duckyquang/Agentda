@@ -3,6 +3,15 @@ export { openDb, type Db } from './db'
 export { type BotPolicy, type DecisionSource, decide, defaultPolicy, type GateOutcome, matches, type Mode } from './gate'
 export { type ApprovalRequest, ApprovalQueue, type Resolution } from './approvals'
 export { HookServer } from './hook-server'
+export {
+  Bridge,
+  type BridgeHost,
+  type BridgeTransport,
+  cardBody,
+  LiveChecklist,
+  type OutboundRef,
+  type StepStatus,
+} from './bridge'
 export { amendmentReason, type ApprovalReply, parseApprovalReply } from './reply'
 export { fetchAudio, transcribe, type VoiceBackend, type VoiceConfig, voiceConfigFromEnv, VoiceUnavailable } from './voice'
 export { type BudgetVerdict, checkBudget, type Guardrails, recordTurn } from './budget'

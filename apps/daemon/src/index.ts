@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   ApprovalQueue,
+  type ApprovalRequest,
   archivePersona,
+  type LiveChecklist,
   createPersona,
   HookServer,
   loadPersonas,
@@ -25,6 +27,8 @@ import { ClaudeAdapter } from '@agentda/provider-claude'
 import { CodexAdapter } from '@agentda/provider-codex'
 import { AnthropicClient, ApiAdapter, GeminiClient, OpenAICompatClient } from '@agentda/provider-api'
 import { ControlApi } from './api'
+import { createDiscordBridge } from './discord'
+import { createSlackBridge } from './slack'
 import { createBridge } from './telegram'
 
 const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
@@ -48,22 +52,33 @@ const chatFor = new Map<string, string>() // botId -> last chat, so approvals re
 
 // Open approvals, so a desktop client that connects mid-wait still sees them.
 const openApprovals = new Map<string, any>()
+// The edit-in-place checklist a chat sees while a turn runs, one per bot.
+const liveLists = new Map<string, LiveChecklist>()
 
 const queue = new ApprovalQueue(db, {
   timeoutMs: Number(process.env.AGENTDA_APPROVAL_TIMEOUT_MS ?? 30 * 60_000),
   ask: (req) => {
     openApprovals.set(req.id, req)
     api?.emit('approval', { id: req.id, bot: req.bot, tool: req.tool, input: req.input, reason: req.reason })
+    liveLists.get(req.bot)?.mark(req.tool, 'wait')
     // Only real Telegram chat ids go to Telegram. A desktop turn carries
     // `desktop:<bot>`, and sending to that id makes the API reject and, being
     // unawaited, take the daemon down with it.
-    const chat = isTelegramChat(req.chat) ? req.chat : chatFor.get(req.bot)
-    if (chat) void bridgeFor(req.bot)?.ask(req, chat).catch((e: Error) => console.warn(`telegram ask failed: ${e.message}`))
+    // Desktop turns carry `desktop:<bot>`, which no chat bridge can post to;
+    // those cards live in the app's own inbox.
+    const chat = req.chat && routeFor.has(req.chat) ? req.chat : chatFor.get(req.bot)
+    const speaker = chat ? speakerFor(req.bot, chat) : undefined
+    if (chat && speaker) void speaker.ask(req, chat).catch((e: Error) => console.warn(`${speaker.platform} ask failed: ${e.message}`))
   },
   onResolved: (req, r) => {
     openApprovals.delete(req.id)
     api?.emit('resolved', { id: req.id, decision: r.decision, source: r.source })
-    if (r.source !== 'human-tap') void bridgeFor(req.bot)?.closeCard(req.id, `${r.decision} (${r.source})`)
+    liveLists.get(req.bot)?.mark(req.tool, r.decision === 'allow' ? 'ok' : 'deny')
+    // Whichever bridge posted the card owns it; the others no-op on an id they
+    // never saw.
+    if (r.source !== 'human-tap') {
+      for (const s of speakers) void s.closeCard(req.id, `${r.decision} (${r.source})`)
+    }
   },
 })
 
@@ -258,36 +273,93 @@ const api = new ControlApi({
 await api.listen()
 console.log(`desktop UI at ${api.url()}`)
 
-// One bridge per Telegram identity (PLAN Phase 2). A persona with its own
-// BotFather token speaks under its own name and avatar; everything else shares
-// the daemon's token. Owner pairing is per Telegram account, not per bot, so a
-// new token needs no new pairing — the same human is already trusted.
-type Bridge = ReturnType<typeof createBridge>
+// One bridge per chat identity. On Telegram a persona with its own BotFather
+// token speaks under its own name; everything else shares the daemon's token.
+// Slack and Discord are one app each, which is what those platforms give you.
+// Owner pairing is per platform account, so a second Telegram token needs no
+// second pairing.
+interface Speaker {
+  platform: string
+  send: (chat: string, text: string) => Promise<unknown>
+  ask: (req: ApprovalRequest, chat: string) => Promise<void>
+  closeCard: (id: string, outcome: string) => Promise<void>
+  checklist: (chat: string, title: string) => LiveChecklist
+  stop: () => Promise<unknown>
+}
+
 const SHARED = ''
-const bridges = new Map<string, Bridge>()
+const telegramSpeakers = new Map<string, Speaker>() // bot id, or SHARED
+const speakers = new Set<Speaker>()
+// Which bridge a chat is reachable on, learned from the messages that arrive
+// there. A daemon that has never heard from a chat cannot post into it anyway.
+const routeFor = new Map<string, Speaker>()
 
-const bridgeFor = (botId: string): Bridge | undefined => bridges.get(botId) ?? bridges.get(SHARED)
+// The bot's own Telegram identity wins when it has one; otherwise whoever owns
+// the thread the message came from.
+function speakerFor(botId: string, chat: string): Speaker | undefined {
+  const via = routeFor.get(chat)
+  if (via?.platform === 'telegram') return telegramSpeakers.get(botId) ?? via
+  return via
+}
 
-function startBridge(key: string, botToken: string, bound?: string): void {
-  const bridge = createBridge({
-    token: botToken,
+function bridgeHost(bound?: string) {
+  return {
     owners,
     queue,
-    voice: voiceConfigFromEnv(),
-    // A bound bridge only ever speaks for its own persona, so a message to it
-    // never has to name anyone.
-    personas: () => (bound ? personas.filter((p) => p.id === bound) : personas),
-    logDropped: (userId, why) => console.warn(`dropped update from ${userId}: ${why}`),
-    onMessage: async (persona, chat, text) => {
+    personas: () => personas,
+    bound: bound ? () => personas.find((p) => p.id === bound) : undefined,
+    logDropped: (userId: string, why: string) => console.warn(`dropped update from ${userId}: ${why}`),
+    onMessage: async (persona: Persona, chat: string, text: string) => {
       await runTurn(persona, chat, stripAddress(text, persona), text)
     },
-    onCommand: async (cmd, args, chat, reply) => handleCommand(cmd, args, chat, reply),
+    onCommand: (cmd: string, args: string, chat: string, reply: (s: string) => Promise<void>) =>
+      handleCommand(cmd, args, chat, reply),
+  }
+}
+
+// Remembers which bridge a chat belongs to, so replies and approval cards go
+// back the way they came. The holder exists because the host has to be built
+// before the bridge, and the speaker wraps the bridge.
+function withRoute(holder: { speaker?: Speaker }, host: ReturnType<typeof bridgeHost>): ReturnType<typeof bridgeHost> {
+  const note = (chat: string) => {
+    if (holder.speaker) routeFor.set(chat, holder.speaker)
+  }
+  return {
+    ...host,
+    onMessage: async (persona, chat, text) => {
+      note(chat)
+      await host.onMessage(persona, chat, text)
+    },
+    onCommand: async (cmd, args, chat, reply) => {
+      note(chat)
+      await host.onCommand(cmd, args, chat, reply)
+    },
+  }
+}
+
+function register(holder: { speaker?: Speaker }, speaker: Speaker): Speaker {
+  holder.speaker = speaker
+  speakers.add(speaker)
+  return speaker
+}
+
+function startTelegram(key: string, botToken: string, bound?: string): void {
+  const holder: { speaker?: Speaker } = {}
+  const bridge = createBridge({ token: botToken, voice: voiceConfigFromEnv(), ...withRoute(holder, bridgeHost(bound)) })
+  const speaker = register(holder, {
+    platform: 'telegram',
+    send: bridge.send,
+    ask: bridge.ask,
+    closeCard: bridge.closeCard,
+    checklist: bridge.checklist,
+    stop: bridge.stop,
   })
-  bridges.set(key, bridge)
-  void bridge.bot
-    .start({ drop_pending_updates: true, onStart: (me) => console.log(`${bound ?? 'shared'} bridge live as @${me.username}`) })
+  telegramSpeakers.set(key, speaker)
+  void bridge
+    .start((me) => console.log(`${bound ?? 'shared'} Telegram bridge live as @${me.username}`))
     .catch((err) => {
-      bridges.delete(key)
+      telegramSpeakers.delete(key)
+      speakers.delete(speaker)
       const e = err as { error_code?: number; message: string }
       console.error(
         e.error_code === 401
@@ -304,37 +376,69 @@ function startBridge(key: string, botToken: string, bound?: string): void {
 function syncBridges(): void {
   for (const p of personas) {
     const t = tokens.get(p.id)
-    if (t && !bridges.has(p.id)) startBridge(p.id, t, p.id)
+    if (t && !telegramSpeakers.has(p.id)) startTelegram(p.id, t, p.id)
   }
-  for (const [key, bridge] of bridges) {
+  for (const [key, speaker] of telegramSpeakers) {
     if (key === SHARED) continue
     if (!tokens.get(key) || !personas.some((p) => p.id === key)) {
-      bridges.delete(key)
-      void bridge.bot.stop().catch(() => {})
+      telegramSpeakers.delete(key)
+      speakers.delete(speaker)
+      void speaker.stop().catch(() => {})
     }
   }
 }
 
-// Telegram is optional: without any token the daemon still serves the desktop
-// app, which is the whole point of not coupling them.
+// Every bridge is optional: with none of them the daemon still serves the
+// desktop app, which is the whole point of not coupling them.
 const sharedToken = process.env.TELEGRAM_BOT_TOKEN
-if (sharedToken) startBridge(SHARED, sharedToken)
+if (sharedToken) startTelegram(SHARED, sharedToken)
 syncBridges()
-if (!bridges.size) {
-  console.log('no Telegram token — running desktop-only (add one from @BotFather in the app, or set TELEGRAM_BOT_TOKEN)')
+
+if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+  const holder: { speaker?: Speaker } = {}
+  const slack = createSlackBridge({
+    botToken: process.env.SLACK_BOT_TOKEN,
+    appToken: process.env.SLACK_APP_TOKEN,
+    ...withRoute(holder, bridgeHost()),
+  })
+  register(holder, {
+    platform: 'slack',
+    send: slack.send,
+    ask: slack.ask,
+    closeCard: slack.closeCard,
+    checklist: slack.checklist,
+    stop: slack.stop,
+  })
+  void slack.start().then(() => console.log('Slack bridge live (socket mode)')).catch((e: Error) => console.error(`Slack bridge failed: ${e.message}`))
+}
+
+if (process.env.DISCORD_BOT_TOKEN) {
+  const holder: { speaker?: Speaker } = {}
+  const discord = createDiscordBridge({ token: process.env.DISCORD_BOT_TOKEN, ...withRoute(holder, bridgeHost()) })
+  register(holder, {
+    platform: 'discord',
+    send: discord.send,
+    ask: discord.ask,
+    closeCard: discord.closeCard,
+    checklist: discord.checklist,
+    stop: async () => discord.stop(),
+  })
+  discord.client.once('clientReady', (c: { user: { tag: string } }) => console.log(`Discord bridge live as ${c.user.tag}`))
+  void discord.start().catch((e: Error) => console.error(`Discord bridge failed: ${e.message}`))
+}
+
+if (!speakers.size) {
+  console.log('no chat bridge configured — running desktop-only (add a Telegram token in the app, or set SLACK_BOT_TOKEN / DISCORD_BOT_TOKEN)')
 }
 
 // Whatever the bot says, said by the right identity: its own bridge when it has
-// one, the shared bridge otherwise, and the desktop app either way.
+// one, the thread's bridge otherwise, and the desktop app either way.
 async function say(persona: Persona, chat: string, text: string): Promise<void> {
   if (!text) return
   api.emit('message-out', { bot: persona.id, text })
-  if (!isTelegramChat(chat)) return
-  const bot = bridgeFor(persona.id)?.bot
-  if (!bot) return
-  for (let i = 0; i < text.length; i += 4000) {
-    await bot.api.sendMessage(chat, text.slice(i, i + 4000)).catch((e) => console.warn(`telegram send failed: ${e.message}`))
-  }
+  const speaker = speakerFor(persona.id, chat)
+  if (!speaker) return
+  await speaker.send(chat, text).catch((e: Error) => console.warn(`${speaker.platform} send failed: ${e.message}`))
 }
 
 async function handleCommand(cmd: string, args: string, chat: string, reply: (s: string) => Promise<void>): Promise<void> {
@@ -401,8 +505,6 @@ const scheduler = new Scheduler(
   },
 )
 
-const isTelegramChat = (chat: string | null | undefined): chat is string => !!chat && /^-?\d+$/.test(chat)
-
 function lastKnownChat(): string | undefined {
   return chatFor.values().next().value
 }
@@ -413,17 +515,30 @@ function lastKnownChat(): string | undefined {
 async function runTurn(persona: Persona, chat: string, input: string, task: string): Promise<void> {
   chatFor.set(persona.id, chat)
   // The desktop renders a live checklist off these, so they are emitted as the
-  // turn happens rather than summarised at the end.
+  // turn happens rather than summarised at the end. Chat gets the same thing as
+  // one message edited in place.
   api.emit('activity', { bot: persona.id, kind: 'start' })
+  const list = speakerFor(persona.id, chat)?.checklist(chat, `${persona.id} is working on it…`)
+  if (list) liveLists.set(persona.id, list)
   const res = await runner
     .run(persona, chat, input, {
       onEvent: (e) => {
         if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
-        if (e.type === 'tool_call') api.emit('activity', { bot: persona.id, kind: 'tool', name: e.name })
-        if (e.type === 'warning') api.emit('activity', { bot: persona.id, kind: 'warning', text: e.message })
+        if (e.type === 'tool_call') {
+          api.emit('activity', { bot: persona.id, kind: 'tool', name: e.name })
+          list?.add(e.name)
+        }
+        if (e.type === 'warning') {
+          api.emit('activity', { bot: persona.id, kind: 'warning', text: e.message })
+          list?.add(e.message, 'deny')
+        }
       },
     })
-    .finally(() => api.emit('activity', { bot: persona.id, kind: 'end' }))
+    .finally(async () => {
+      api.emit('activity', { bot: persona.id, kind: 'end' })
+      liveLists.delete(persona.id)
+      await list?.finish()
+    })
   for (const n of res.notices ?? []) await say(persona, chat, n) // e.g. a provider switch
   if (res.skipped) return say(persona, chat, `(skipped: ${res.skipped})`)
   if (res.error) return say(persona, chat, `${res.error.kind}: ${res.error.hint ?? res.error.message}`)
@@ -453,9 +568,15 @@ function stripAddress(text: string, p: Persona): string {
   return text.replace(new RegExp(`(^|\\s)@?${p.id}\\b[:,]?`, 'i'), ' ').trim() || text
 }
 
-if (bridges.size && owners.count('telegram') === 0) {
-  const code = owners.mintCode('telegram')
-  console.log(`\nPAIRING CODE: ${code}\nDM this code to your bot on Telegram to claim it. Until then it answers nobody.\n`)
+// One pairing code per platform in use: a bot handle is public everywhere, so
+// every platform has to learn which human is the owner.
+for (const platform of ['telegram', 'slack', 'discord']) {
+  const running = [...speakers].some((s) => s.platform === platform)
+  if (running && owners.count(platform) === 0) {
+    console.log(
+      `\nPAIRING CODE (${platform}): ${owners.mintCode(platform)}\nSend this code to your bot on ${platform} to claim it. Until then it answers nobody.\n`,
+    )
+  }
 }
 
 let shuttingDown = false
@@ -465,7 +586,7 @@ const shutdown = async (code = 0) => {
   console.log('\nshutting down…')
   scheduler.stop()
   queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
-  await Promise.all([...bridges.values()].map((b) => b.bot.stop().catch(() => {})))
+  await Promise.all([...speakers].map((s) => s.stop().catch(() => {})))
   await hook.close().catch(() => {})
   await api.close().catch(() => {})
   db.close()

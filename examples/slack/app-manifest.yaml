@@ -1,0 +1,41 @@
+# Agentda's Slack app, as a manifest you can paste at api.slack.com/apps → Create
+# New App → From an app manifest. Socket Mode, so no public URL — same reason
+# the Telegram bridge uses long polling.
+#
+# This is your own app in your own workspace. Agentda is not distributed through
+# the Slack Marketplace, which is what makes Socket Mode the right choice rather
+# than a compromise.
+display_information:
+  name: Agentda
+  description: Your own long-running assistants, with an approval gate in front of anything consequential.
+  background_color: "#16181c"
+features:
+  bot_user:
+    display_name: Agentda
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      # Post, edit (the live checklist and approval cards are edited in place),
+      # and read the conversations the app is actually part of.
+      - chat:write
+      - im:history
+      - im:read
+      - im:write
+      - channels:history
+      - groups:history
+      - app_mentions:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.im
+      - message.channels
+      - message.groups
+      - app_mention
+  interactivity:
+    # Approve and Deny are Block Kit buttons; interactivity has to be on for
+    # their presses to reach the app.
+    is_enabled: true
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

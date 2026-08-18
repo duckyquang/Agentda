@@ -239,6 +239,12 @@ const api = new ControlApi({
     api.emit('bots', { changed: botId })
   },
   tokenIds: () => tokens.ids(),
+  reload: () => {
+    personas = loadPersonas(botsDir)
+    syncBridges()
+    api.emit('bots', { changed: null })
+    return personas.length
+  },
   // The desktop mic goes through the same transcriber as a Telegram voice note
   // (ADR 0004), then down the same path as typing it.
   voiceNote: async (botId, audio) => {

@@ -82,7 +82,8 @@
 </head>
 <body>
 <aside>
-  <div class="brand"><b>Agentda</b><button id="pause">Pause</button></div>
+  <div class="brand"><b>Agentda</b><span><button id="reload" title="Re-read the bot files from disk">↻</button>
+    <button id="pause">Pause</button></span></div>
   <div class="bots" id="bots"></div>
   <div class="newbot"><button id="new-bot">+ New bot</button></div>
 </aside>
@@ -505,6 +506,14 @@ for (const tab of document.querySelectorAll('[data-view]')) {
 }
 
 el('new-bot').onclick = () => { editingNew = true; view = 'settings'; render() }
+
+// The bot files are the truth and people edit them by hand; this is the app's
+// version of /reload.
+el('reload').onclick = async () => {
+  await api('/api/reload', { method: 'POST', body: '{}' })
+  if (view === 'settings' || view === 'routines') await loadDetail()
+  await refresh()
+}
 
 el('mode-toggle').onclick = async () => {
   const b = bot()

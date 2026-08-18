@@ -56,6 +56,7 @@ async function harness() {
     setToken: () => {},
     clearToken: () => {},
     tokenIds: () => [],
+    reload: () => 1,
   })
   await api.listen(0)
 

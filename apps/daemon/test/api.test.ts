@@ -48,6 +48,7 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
     setToken: () => {},
     clearToken: () => {},
     tokenIds: () => [],
+    reload: () => 1,
     ...over,
   }
   const api = new ControlApi(deps)

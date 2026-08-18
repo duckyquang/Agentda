@@ -33,6 +33,9 @@ export interface ApiDeps {
   setToken: (botId: string, token: string) => void
   clearToken: (botId: string) => void
   tokenIds: () => string[]
+  // Re-read the bot directories: the files are the truth, and people edit them
+  // by hand while the daemon is up.
+  reload: () => number
 }
 
 // What the browser server is told to do next. Frames flow one way; this is the
@@ -244,6 +247,9 @@ export class ControlApi {
         if (url.pathname === '/api/mode') {
           this.deps.setMode(body.bot, body.mode === 'auto' ? 'auto' : 'ask')
           return void json(200, { ok: true })
+        }
+        if (url.pathname === '/api/reload') {
+          return void json(200, { bots: this.deps.reload() })
         }
         if (url.pathname === '/api/pause') {
           this.deps.pause(!!body.on)

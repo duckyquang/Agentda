@@ -19,8 +19,10 @@ export interface ApiTurnOptions {
   mcpConfig?: string
   systemPromptFile?: string
   // Supplied per turn by the runner, which knows the bot's policy. Returning
-  // 'deny' means the tool never executes; the model is told it was refused.
-  gate?: (tool: string, input: unknown) => Promise<'allow' | 'deny'>
+  // 'deny' means the tool never executes; the model is told it was refused, and
+  // why — an approval answered with "but cc anna" is a denial whose reason IS
+  // the instruction, and dropping it loses the amendment (FR-21).
+  gate?: (tool: string, input: unknown) => Promise<{ decision: 'allow' | 'deny'; reason?: string }>
   maxSteps?: number
 }
 
@@ -82,11 +84,18 @@ export class ApiAdapter implements ProviderAdapter {
 
         for (const call of reply.toolCalls) {
           yield { type: 'tool_call', name: call.name, input: call.input }
-          const decision = opts.gate ? await opts.gate(call.name, call.input) : 'deny'
-          if (decision === 'deny') {
-            // The model hears the refusal and can respond to it, exactly like
-            // a denied tool on the CLI providers.
-            messages.push({ role: 'tool', id: call.id, name: call.name, content: 'Denied: the human refused this action.' })
+          const verdict = opts.gate
+            ? await opts.gate(call.name, call.input)
+            : { decision: 'deny' as const, reason: 'no gate is wired, so nothing may run' }
+          if (verdict.decision === 'deny') {
+            // The model hears the refusal AND the reason, exactly like the
+            // permissionDecisionReason the CLI providers get.
+            messages.push({
+              role: 'tool',
+              id: call.id,
+              name: call.name,
+              content: `Denied: ${verdict.reason ?? 'the human refused this action.'}`,
+            })
             continue
           }
           messages.push({ role: 'tool', id: call.id, name: call.name, content: await tools.call(call) })

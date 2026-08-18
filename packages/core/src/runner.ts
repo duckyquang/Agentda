@@ -129,14 +129,14 @@ export class TurnRunner {
         model: persona.model,
         // API providers run our own loop, so the gate is a plain call — no
         // hook, no shim, no race.
-        gate: async (tool: string, toolInput: unknown) =>
-          (
-            await this.deps.queue.request(
-              { bot: persona.id, chat, tool, input: toolInput },
-              persona.policy,
-              this.deps.isPaused?.() ?? false,
-            )
-          ).decision,
+        gate: async (tool: string, toolInput: unknown) => {
+          const r = await this.deps.queue.request(
+            { bot: persona.id, chat, tool, input: toolInput },
+            persona.policy,
+            this.deps.isPaused?.() ?? false,
+          )
+          return { decision: r.decision, reason: r.reason }
+        },
       })) {
         opts.onEvent?.(ev)
         if (ev.type === 'text') text.push(ev.text)

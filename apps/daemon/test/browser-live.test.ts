@@ -40,7 +40,7 @@ function harness(root: string, persona: ReturnType<typeof loadPersonas>[number],
   const dbPath = join(root, 'state.db')
   const db = openDb(dbPath)
   const asked: string[] = []
-  const queue = new ApprovalQueue(db, { timeoutMs, ask: (r) => asked.push(r.tool) })
+  const queue = new ApprovalQueue(db, { timeoutMs, ask: (r) => void asked.push(r.tool) })
   const hook = new HookServer(queue, () => ({ bot: persona.id, chat: 'test', policy: persona.policy, paused: false }), 'bsecret')
   const runner = () =>
     new TurnRunner({

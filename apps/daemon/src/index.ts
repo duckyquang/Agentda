@@ -17,6 +17,7 @@ import {
   setPersonaMode,
   TokenStore,
   updatePersona,
+  transcribe,
   TurnRunner,
   voiceConfigFromEnv,
 } from '@agentda/core'
@@ -125,6 +126,9 @@ const runner = new TurnRunner({
         env: {
           AGENTDA_BROWSER_PROFILE: join(p.dir, 'browser-profile'),
           AGENTDA_BROWSER_SURFACE: p.browserSurface,
+          // Where to send screencast frames, so the desktop can watch a shadow
+          // session and take it over mid-run.
+          AGENTDA_PREVIEW_URL: api.previewUrl(p.id),
         },
       },
     }),
@@ -158,6 +162,31 @@ function buildAdapters(): Map<string, any> {
     model: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
   }), 'ollama'))
   return m
+}
+
+// What a desktop message does, shared with the mic so both take exactly the
+// same path — including answering an open card.
+function sendToBot(botId: string, text: string): void {
+  const p = personas.find((x) => x.id === botId)
+  if (!p) return api.emit('message-out', { bot: botId, text: `no bot named ${botId}` })
+  // Same rule as chat: type "yes" at an open card and it answers the card
+  // (FR-21). The desktop has buttons too, but the composer is where your hands
+  // already are.
+  const answered = queue.answerByText(text, { chat: `desktop:${botId}` })
+  if (answered) {
+    return api.emit('message-out', {
+      bot: p.id,
+      text: answered.amendment
+        ? `Sent back for a change: ${answered.amendment} — expect a revised ${answered.tool} card.`
+        : `${answered.decision === 'allow' ? 'Approved' : 'Denied'} — ${answered.tool}.`,
+    })
+  }
+  // Deliberately not awaited: the turn may pause on an approval for as long as
+  // the human takes, and the UI shows that card meanwhile. Same path as a chat
+  // message, so the desktop gets handoffs and provider notices too.
+  void runTurn(p, `desktop:${botId}`, text, text).catch((err) =>
+    api.emit('message-out', { bot: p.id, text: `error: ${(err as Error).message}` }),
+  )
 }
 
 const api = new ControlApi({
@@ -210,28 +239,15 @@ const api = new ControlApi({
     api.emit('bots', { changed: botId })
   },
   tokenIds: () => tokens.ids(),
-  send: (botId, text) => {
-    const p = personas.find((x) => x.id === botId)
-    if (!p) return api.emit('message-out', { bot: botId, text: `no bot named ${botId}` })
-    // Same rule as chat: type "yes" at an open card and it answers the card
-    // (FR-21). The desktop has buttons too, but the composer is where your
-    // hands already are.
-    const answered = queue.answerByText(text, { chat: `desktop:${botId}` })
-    if (answered) {
-      return api.emit('message-out', {
-        bot: p.id,
-        text: answered.amendment
-          ? `Sent back for a change: ${answered.amendment} — expect a revised ${answered.tool} card.`
-          : `${answered.decision === 'allow' ? 'Approved' : 'Denied'} — ${answered.tool}.`,
-      })
-    }
-    // Deliberately not awaited: the turn may pause on an approval for as long
-    // as the human takes, and the UI shows that card meanwhile. Same path as a
-    // chat message, so the desktop gets handoffs and provider notices too.
-    void runTurn(p, `desktop:${botId}`, text, text).catch((err) =>
-      api.emit('message-out', { bot: p.id, text: `error: ${(err as Error).message}` }),
-    )
+  // The desktop mic goes through the same transcriber as a Telegram voice note
+  // (ADR 0004), then down the same path as typing it.
+  voiceNote: async (botId, audio) => {
+    const text = await transcribe(audio, voiceConfigFromEnv())
+    api.emit('message-in', { bot: botId, text })
+    sendToBot(botId, text)
+    return text
   },
+  send: sendToBot,
 })
 await api.listen()
 console.log(`desktop UI at ${api.url()}`)
@@ -390,11 +406,18 @@ function lastKnownChat(): string | undefined {
 // counted against the per-task cap, so two bots cannot ping-pong forever.
 async function runTurn(persona: Persona, chat: string, input: string, task: string): Promise<void> {
   chatFor.set(persona.id, chat)
-  const res = await runner.run(persona, chat, input, {
-    onEvent: (e) => {
-      if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
-    },
-  })
+  // The desktop renders a live checklist off these, so they are emitted as the
+  // turn happens rather than summarised at the end.
+  api.emit('activity', { bot: persona.id, kind: 'start' })
+  const res = await runner
+    .run(persona, chat, input, {
+      onEvent: (e) => {
+        if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
+        if (e.type === 'tool_call') api.emit('activity', { bot: persona.id, kind: 'tool', name: e.name })
+        if (e.type === 'warning') api.emit('activity', { bot: persona.id, kind: 'warning', text: e.message })
+      },
+    })
+    .finally(() => api.emit('activity', { bot: persona.id, kind: 'end' }))
   for (const n of res.notices ?? []) await say(persona, chat, n) // e.g. a provider switch
   if (res.skipped) return say(persona, chat, `(skipped: ${res.skipped})`)
   if (res.error) return say(persona, chat, `${res.error.kind}: ${res.error.hint ?? res.error.message}`)
@@ -447,6 +470,14 @@ const shutdown = async (code = 0) => {
 // with approvals still parked and the db mid-write.
 process.on('SIGINT', () => void shutdown())
 process.on('SIGTERM', () => void shutdown())
+// Started by the desktop shell: when its pipe closes the window is gone, and a
+// daemon nobody can see should not keep polling Telegram and firing routines.
+// Opt-in, because under launchd/systemd stdin is /dev/null and ends at once.
+if (process.env.AGENTDA_EXIT_WITH_PARENT === '1') {
+  process.stdin.resume()
+  process.stdin.on('end', () => void shutdown())
+  process.stdin.on('close', () => void shutdown())
+}
 
 scheduler.start()
 // Bridges poll on their own; the daemon stays up for the desktop app and the

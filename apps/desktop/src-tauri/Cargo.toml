@@ -1,0 +1,11 @@
+[package]
+name = "agentda-desktop"
+version = "0.0.0"
+edition = "2021"
+description = "Desktop shell for the Agentda daemon"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

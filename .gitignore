@@ -7,3 +7,4 @@ dist/
 # Local secrets: Telegram token, mailbox credentials. Never commit.
 .env*.local
 .env
+apps/desktop/src-tauri/target/

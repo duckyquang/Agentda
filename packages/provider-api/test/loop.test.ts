@@ -52,13 +52,16 @@ describe('agent loop gating', () => {
       new ApiAdapter(model).startTurn('send it', {
         gate: async (tool) => {
           asked = tool
-          return 'deny'
+          return { decision: 'deny', reason: 'the owner said to use the other address instead' }
         },
       }),
     )
     expect(asked).toBe('mcp__x__send')
     const toolMsg = model.seen[1].find((m: any) => m.role === 'tool') as any
     expect(toolMsg.content).toMatch(/denied/i)
+    // The reason travels with the refusal: an amendment IS a reason, and a
+    // model that never hears it cannot act on it (FR-21).
+    expect(toolMsg.content).toContain('the other address')
   })
 
   it('every tool call is offered to the gate, one at a time', async () => {
@@ -76,7 +79,7 @@ describe('agent loop gating', () => {
       new ApiAdapter(model).startTurn('go', {
         gate: async (t) => {
           asked.push(t)
-          return 'deny'
+          return { decision: 'deny' }
         },
       }),
     )
@@ -85,7 +88,7 @@ describe('agent loop gating', () => {
 
   it('stops at the step cap and says so, instead of looping on the user’s money', async () => {
     const model = scripted([{ toolCalls: [{ id: '1', name: 'mcp__x__loop', input: {} }] }]) // always calls a tool
-    const events = await collect(new ApiAdapter(model).startTurn('go', { gate: async () => 'deny', maxSteps: 3 }))
+    const events = await collect(new ApiAdapter(model).startTurn('go', { gate: async () => ({ decision: 'deny' as const }), maxSteps: 3 }))
     expect(events.filter((e) => e.type === 'tool_call')).toHaveLength(3)
     expect(events.some((e) => e.type === 'warning' && /stopped after 3/.test(e.message))).toBe(true)
     expect(events.at(-1).type).toBe('result')

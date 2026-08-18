@@ -32,7 +32,7 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
   const db = openDb(join(dir, `api${n++}.db`))
   const queue = new ApprovalQueue(db, {})
   const sent: { bot: string; text: string }[] = []
-  const api = new ControlApi({
+  const deps: ConstructorParameters<typeof ControlApi>[0] = {
     db,
     queue,
     personas: () => [persona('chief')],
@@ -41,6 +41,7 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
     setMode: () => {},
     pause: () => {},
     isPaused: () => false,
+    voiceNote: async () => 'transcript',
     createBot: (spec) => persona(spec.id),
     updateBot: (id) => persona(id),
     archiveBot: (id) => join(dir, '.trash', id),
@@ -48,11 +49,12 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
     clearToken: () => {},
     tokenIds: () => [],
     ...over,
-  })
+  }
+  const api = new ControlApi(deps)
   const port = await api.listen(0)
   const url = (p: string) => `http://127.0.0.1:${port}${p}`
   const auth = { authorization: `Bearer ${api.token}`, 'content-type': 'application/json' }
-  return { api, db, queue, sent, url, auth }
+  return { api, db, deps, queue, sent, url, auth }
 }
 
 describe('control API', () => {
@@ -92,16 +94,7 @@ describe('control API', () => {
     const s = await serve()
     let id = ''
     const q = new ApprovalQueue(s.db, { ask: (r) => void (id = r.id) })
-    const api2 = new ControlApi({
-      db: s.db,
-      queue: q,
-      personas: () => [persona('chief')],
-      pending: () => [],
-      send: () => {},
-      setMode: () => {},
-      pause: () => {},
-      isPaused: () => false,
-    })
+    const api2 = new ControlApi({ ...s.deps, queue: q })
     const port = await api2.listen(0)
     const pending = q.request({ bot: 'chief', tool: 'mcp__x__send', input: {} }, { ...defaultPolicy(), grants: ['*'] })
     await new Promise((r) => setImmediate(r))

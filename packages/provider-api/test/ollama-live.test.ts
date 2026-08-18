@@ -52,8 +52,10 @@ function setup(answer: 'allow' | 'deny') {
   )
   // The gate the runner would supply: same queue, same policy, same audit log
   // as the CLI providers — the whole point of the shared design.
-  const gate = async (tool: string, input: unknown) =>
-    (await queue.request({ bot: 'ollamabot', tool, input }, policy)).decision
+  const gate = async (tool: string, input: unknown) => {
+    const r = await queue.request({ bot: 'ollamabot', tool, input }, policy)
+    return { decision: r.decision, reason: r.reason }
+  }
   const audit = () => db.prepare('SELECT tool, decision, source FROM audit_log').all() as any[]
   return { botDir, mcpConfig, gate, audit, db }
 }

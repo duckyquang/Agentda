@@ -31,7 +31,7 @@ function harness(opts: { paired?: number; deps?: Record<string, unknown> } = {})
     ...opts.deps,
   })
   // Stop grammY from calling getMe over the network.
-  bridge.bot.botInfo = { id: 1, is_bot: true, first_name: 'test', username: 'testbot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business_account: false, has_main_web_app: false }
+  bridge.bot.botInfo = { id: 1, is_bot: true, first_name: 'test', username: 'testbot', can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false } as typeof bridge.bot.botInfo
   return { bridge, owners, queue, dropped, messages, db }
 }
 

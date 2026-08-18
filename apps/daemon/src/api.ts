@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { amendmentReason } from '@agentda/core'
 import type { ApprovalQueue, ApprovalRequest, Db, Persona, PersonaPatch } from '@agentda/core'
 
 // Loopback-only control API for the desktop app.
@@ -18,6 +19,9 @@ export interface ApiDeps {
   // Fire-and-forget: a turn can wait minutes on a human, so the reply comes
   // back over the event stream rather than holding an HTTP request open.
   send: (botId: string, text: string) => void
+  // A voice note from the desktop mic. Same destination as typed text once it
+  // has been transcribed — including answering an open approval card.
+  voiceNote: (botId: string, audio: Buffer) => Promise<string>
   setMode: (botId: string, mode: 'ask' | 'auto') => void
   pause: (on: boolean) => void
   isPaused: () => boolean
@@ -31,6 +35,10 @@ export interface ApiDeps {
   tokenIds: () => string[]
 }
 
+// What the browser server is told to do next. Frames flow one way; this is the
+// only thing that flows back.
+export type BrowserControl = 'take-over' | 'hand-back' | null
+
 const UI_DIR = fileURLToPath(new URL('../../desktop/ui', import.meta.url))
 
 export class ControlApi {
@@ -41,6 +49,10 @@ export class ControlApi {
   // Open SSE responses, so shutdown can end them: server.close() waits for
   // active connections, and an event stream never ends on its own.
   private streams = new Set<import('node:http').ServerResponse>()
+  // Per-bot browser control, read by the browser server as it works. Take over
+  // stops the bot touching the page and puts the window on screen; hand back
+  // gives it to the bot again.
+  private browserControl = new Map<string, BrowserControl>()
 
   constructor(private deps: ApiDeps) {
     this.server = createServer((req, res) => void this.handle(req, res).catch((err) => {
@@ -157,6 +169,51 @@ export class ControlApi {
         }
       }
 
+      // Bot-screen preview (PLAN Phase 2). The browser runs inside an MCP
+      // server the CLI spawned, not in the daemon, so frames come to us rather
+      // than us reaching into it. JPEG bytes straight through: re-encoding a
+      // screencast frame to JSON would cost more than the frame is worth.
+      const previewRoute = /^\/api\/preview\/([\w-]+)(\/control)?$/.exec(url.pathname)
+      if (previewRoute && req.method === 'POST' && !previewRoute[2]) {
+        // CDP hands us base64 JPEG already, so it travels as-is: decoding it
+        // here only to re-encode it for the browser would be work for nobody.
+        let jpeg = ''
+        for await (const c of req) {
+          jpeg += c
+          if (jpeg.length > 4_000_000) return void json(413, { error: 'frame too large' })
+        }
+        this.emit('frame', { bot: previewRoute[1], jpeg })
+        // The response carries the control state, so a working browser learns
+        // it has been taken over on its next frame without a second request.
+        return void json(200, { control: this.browserControl.get(previewRoute[1]) ?? null })
+      }
+      if (previewRoute && previewRoute[2] && req.method === 'GET') {
+        return void json(200, { control: this.browserControl.get(previewRoute[1]) ?? null })
+      }
+      if (previewRoute && previewRoute[2] && req.method === 'POST') {
+        const body = await readBody(req)
+        const control: BrowserControl = body.control === 'take-over' ? 'take-over' : body.control === 'hand-back' ? 'hand-back' : null
+        this.browserControl.set(previewRoute[1], control)
+        this.emit('browser-control', { bot: previewRoute[1], control })
+        return void json(200, { control })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/voice') {
+        const bot = url.searchParams.get('bot') ?? ''
+        const chunks: Buffer[] = []
+        let size = 0
+        for await (const c of req) {
+          size += (c as Buffer).length
+          if (size > 25_000_000) return void json(413, { error: 'that recording is too long' })
+          chunks.push(c as Buffer)
+        }
+        try {
+          return void json(200, { text: await this.deps.voiceNote(bot, Buffer.concat(chunks)) })
+        } catch (err) {
+          return void json(400, { error: (err as Error).message })
+        }
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/audit') {
         const asked = Number(url.searchParams.get('limit') ?? 100)
         // A non-numeric or negative limit must not reach SQLite: it throws a
@@ -172,10 +229,16 @@ export class ControlApi {
       if (req.method === 'POST') {
         const body = await readBody(req)
         if (url.pathname === '/api/approve') {
-          const ok = this.deps.queue.settle(body.id, {
-            decision: body.decision === 'allow' ? 'allow' : 'deny',
-            source: 'human-tap',
-          })
+          // An amendment denies this call and hands the model the change to
+          // make, so the next card shows a real payload rather than one we
+          // edited behind the model's back (FR-21).
+          const amending = body.decision === 'amend' && String(body.instruction ?? '').trim()
+          const ok = this.deps.queue.settle(
+            body.id,
+            amending
+              ? { decision: 'deny', source: 'human-text', reason: amendmentReason(amending) }
+              : { decision: body.decision === 'allow' ? 'allow' : 'deny', source: 'human-tap' },
+          )
           return void json(200, { settled: ok })
         }
         if (url.pathname === '/api/mode') {
@@ -263,6 +326,11 @@ export class ControlApi {
 
   url(): string {
     return `http://127.0.0.1:${this.port}/?token=${this.token}`
+  }
+
+  // Handed to each bot's browser server so it knows where to send frames.
+  previewUrl(botId: string): string {
+    return `http://127.0.0.1:${this.port}/api/preview/${botId}?token=${this.token}`
   }
 
   close(): Promise<void> {

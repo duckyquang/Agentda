@@ -14,7 +14,7 @@
   body { margin: 0; height: 100vh; display: grid; grid-template-columns: 280px 1fr;
     background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-  .brand { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+  .brand { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .brand b { font-size: 18px; letter-spacing: -.01em; }
   .bots { overflow-y: auto; flex: 1; }
   .bot { padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
@@ -23,53 +23,87 @@
   .dot { width: 26px; height: 26px; border-radius: 50%; background: #3a4048; flex: none;
     display: grid; place-items: center; font-size: 12px; font-weight: 600; }
   .bot .meta { min-width: 0; flex: 1; }
-  .bot .row { display: flex; justify-content: space-between; gap: 8px; }
+  .bot .row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
   .bot .name { font-weight: 600; }
   .bot .last { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tag { font-size: 11px; letter-spacing: .04em; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .bot .last.alert { color: var(--auto); }
+  .tag { font-size: 11px; letter-spacing: .04em; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); cursor: default; }
   .tag.auto { color: var(--auto); border-color: #4a3f26; }
+  .tag.on { color: var(--ok); border-color: #2c4a38; }
+  .newbot { padding: 10px 16px; border-top: 1px solid var(--line); }
   main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  header { padding: 12px 18px; font-size: 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  header { padding: 10px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  header strong { font-size: 17px; }
   header .grow { flex: 1; }
-  header button, header .tag { font-size: 14px; }
   button { font: inherit; color: var(--ink); background: #2a2f37; border: 1px solid var(--line);
     padding: 6px 12px; border-radius: 8px; cursor: pointer; }
   button:hover { background: #333944; }
+  button[aria-current="true"] { background: #333944; border-color: #454c58; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #10131a; font-weight: 600; }
   button.danger { background: transparent; border-color: #59403f; color: var(--no); }
-  #thread { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  button.rec { background: #4a2523; border-color: #6d3330; }
+  #view { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
   .msg { max-width: 68ch; padding: 10px 14px; border-radius: 12px; background: var(--panel); white-space: pre-wrap; word-wrap: break-word; }
   .msg.me { align-self: flex-end; background: #2f4468; }
   .msg.sys { align-self: center; background: transparent; color: var(--dim); font-size: 12px; }
+  .checklist { max-width: 68ch; border-left: 2px solid var(--line); padding: 2px 0 2px 12px; color: var(--dim); font-size: 13px; }
+  .checklist div { display: flex; gap: 8px; }
+  .checklist .wait { color: var(--auto); }
+  .checklist .deny { color: var(--no); }
+  .checklist .ok { color: var(--ok); }
   .card { border: 1px solid #4a3f26; background: #221f18; border-radius: 12px; padding: 12px 14px; max-width: 68ch; }
-  .card h4 { margin: 0 0 6px; font-size: 14px; }
-  .card pre { margin: 8px 0; padding: 8px; background: #14161a; border-radius: 8px; overflow-x: auto; font-size: 12px; }
-  .card .actions { display: flex; gap: 8px; margin-top: 8px; }
-  form { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
-  input[type=text] { flex: 1; background: #14161a; color: var(--ink); border: 1px solid var(--line);
-    border-radius: 10px; padding: 10px 14px; font: inherit; }
+  .card h4 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+  .card .who { color: var(--dim); font-size: 12px; }
+  .card pre { margin: 8px 0; padding: 8px; background: #14161a; border-radius: 8px; overflow-x: auto; font-size: 12px; max-height: 40vh; }
+  .card .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .card input[type=text] { flex: 1; min-width: 180px; }
+  form.composer { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
+  input[type=text], input[type=number], select, textarea { background: #14161a; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 10px; padding: 9px 12px; font: inherit; }
+  form.composer input[type=text] { flex: 1; }
+  textarea { width: 100%; min-height: 140px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-  th { color: var(--dim); font-weight: 500; }
-  td.deny { color: var(--no); } td.allow { color: var(--ok); }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; position: sticky; top: -18px; background: var(--bg); }
+  td.deny { color: var(--no); } td.allow { color: var(--ok); } td.ok { color: var(--ok); } td.error { color: var(--no); }
   .empty { color: var(--dim); padding: 24px; text-align: center; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .editor { display: grid; gap: 14px; max-width: 62ch; }
+  .editor label { display: grid; gap: 4px; font-size: 13px; color: var(--dim); }
+  .editor .inline { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .editor .inline label { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
+  fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  legend { color: var(--dim); font-size: 12px; padding: 0 6px; }
+  .hint { color: var(--dim); font-size: 12px; }
+  .screen { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .screen img { display: block; width: 100%; }
+  .screen .idle { color: var(--dim); padding: 40px; text-align: center; }
 </style>
 </head>
 <body>
 <aside>
   <div class="brand"><b>Agentda</b><button id="pause">Pause</button></div>
   <div class="bots" id="bots"></div>
+  <div class="newbot"><button id="new-bot">+ New bot</button></div>
 </aside>
 <main>
   <header>
     <strong id="title">—</strong>
-    <span class="tag" id="mode"></span>
+    <button id="mode-toggle" class="tag" title="Switch between Ask and Auto"></button>
     <span class="grow"></span>
-    <button id="tab-chat">Chat</button>
-    <button id="tab-audit">Audit</button>
+    <button data-view="chat">Chat</button>
+    <button data-view="inbox">Approvals</button>
+    <button data-view="audit">Audit</button>
+    <button data-view="routines">Routines</button>
+    <button data-view="screen">Screen</button>
+    <button data-view="settings">Settings</button>
   </header>
-  <div id="thread"><div class="empty">Pick a bot.</div></div>
-  <form id="composer"><input type="text" id="text" placeholder="Message your bot…" autocomplete="off" /><button class="primary">Send</button></form>
+  <div id="view"><div class="empty">Pick a bot.</div></div>
+  <form class="composer" id="composer">
+    <input type="text" id="text" placeholder="Message your bot…" autocomplete="off" />
+    <button type="button" id="mic" title="Record a voice note">🎤</button>
+    <button class="primary">Send</button>
+  </form>
 </main>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '__AGENTDA_TOKEN__'
@@ -80,65 +114,75 @@ const api = (path, opts = {}) =>
 let state = { bots: [], pending: [], paused: false }
 let current = null
 let view = 'chat'
-const threads = new Map() // botId -> [{who, text}]
+let detail = null          // the bot being edited, loaded on demand
+let editingNew = false
+const threads = new Map()  // botId -> [{who, text} | {checklist:[...]}]
+const frames = new Map()   // botId -> last screencast frame
+const handedOver = new Set()
 
 const el = (id) => document.getElementById(id)
-const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const bot = () => state.bots.find((b) => b.id === current)
+const thread = (id) => threads.get(id) || (threads.set(id, []), threads.get(id))
+
+// ---- roster ---------------------------------------------------------------
 
 function renderBots() {
   el('bots').innerHTML = state.bots.map((b) => {
-    const last = (threads.get(b.id) || []).at(-1)
-    const waiting = state.pending.some((p) => p.bot === b.id)
-    return `<div class="bot" data-id="${b.id}" aria-selected="${current === b.id}">
+    const last = thread(b.id).filter((m) => m.text).at(-1)
+    const waiting = state.pending.filter((p) => p.bot === b.id).length
+    return `<div class="bot" data-id="${esc(b.id)}" aria-selected="${current === b.id}">
       <div class="dot">${esc(b.name.slice(0, 1).toUpperCase())}</div>
       <div class="meta">
         <div class="row"><span class="name">${esc(b.name)}</span>
           <span class="tag ${b.mode === 'auto' ? 'auto' : ''}">${b.mode.toUpperCase()}</span></div>
-        <div class="last">${waiting ? '● needs you' : esc(last ? last.text.slice(0, 60) : b.provider)}</div>
+        <div class="last ${waiting ? 'alert' : ''}">${waiting
+          ? `● ${waiting} waiting on you`
+          : esc(last ? last.text.slice(0, 60) : b.providers.join(' → '))}</div>
       </div></div>`
-  }).join('') || '<div class="empty">No bots configured.</div>'
+  }).join('') || '<div class="empty">No bots yet.</div>'
   for (const node of document.querySelectorAll('.bot')) {
-    node.onclick = () => { current = node.dataset.id; view = 'chat'; render() }
+    node.onclick = () => { current = node.dataset.id; detail = null; editingNew = false; if (view === 'settings') loadDetail(); render() }
   }
 }
 
-function renderThread() {
-  const bot = state.bots.find((b) => b.id === current)
-  el('title').textContent = bot ? bot.name : '—'
-  el('mode').textContent = bot ? (state.paused ? 'PAUSED' : bot.mode.toUpperCase()) : ''
-  el('composer').style.display = bot && view === 'chat' ? 'flex' : 'none'
-  if (!bot) return void (el('thread').innerHTML = '<div class="empty">Pick a bot.</div>')
+// ---- chat -----------------------------------------------------------------
 
-  if (view === 'audit') return renderAudit(bot)
-
-  const msgs = (threads.get(bot.id) || []).map((m) =>
-    `<div class="msg ${m.who === 'me' ? 'me' : m.who === 'sys' ? 'sys' : ''}">${esc(m.text)}</div>`).join('')
-  const cards = state.pending.filter((p) => p.bot === bot.id).map((p) =>
-    `<div class="card"><h4>${esc(bot.name)} wants to run <code>${esc(p.tool)}</code></h4>
-      <div style="color:var(--dim);font-size:12px">${esc(p.reason || '')}</div>
-      <pre>${esc(JSON.stringify(p.input, null, 2)).slice(0, 2000)}</pre>
-      <div class="actions">
-        <button class="primary" data-approve="${p.id}">Approve</button>
-        <button class="danger" data-deny="${p.id}">Deny</button>
-      </div></div>`).join('')
-  el('thread').innerHTML = msgs + cards || '<div class="empty">No messages yet.</div>'
-  el('thread').scrollTop = el('thread').scrollHeight
-  for (const b of document.querySelectorAll('[data-approve]')) {
-    b.onclick = () => decide(b.dataset.approve, 'allow')
-  }
-  for (const b of document.querySelectorAll('[data-deny]')) {
-    b.onclick = () => decide(b.dataset.deny, 'deny')
-  }
+function renderChat() {
+  const items = thread(current).map((m) => {
+    if (m.checklist) {
+      return `<div class="checklist">${m.checklist.map((s) =>
+        `<div class="${s.status}"><span>${s.status === 'wait' ? '◷' : s.status === 'deny' ? '✗' : s.status === 'ok' ? '✓' : '·'}</span><span>${esc(s.name)}</span></div>`).join('')}</div>`
+    }
+    return `<div class="msg ${m.who === 'me' ? 'me' : m.who === 'sys' ? 'sys' : ''}">${esc(m.text)}</div>`
+  }).join('')
+  const cards = state.pending.filter((p) => p.bot === current).map(approvalCard).join('')
+  el('view').innerHTML = items + cards || '<div class="empty">No messages yet.</div>'
+  el('view').scrollTop = el('view').scrollHeight
+  wireCards()
 }
 
-async function renderAudit(bot) {
-  const { rows } = await api(`/api/audit?limit=200&bot=${encodeURIComponent(bot.id)}`)
-  el('thread').innerHTML = rows.length
-    ? `<table><tr><th>when</th><th>tool</th><th>decision</th><th>why</th><th>mode</th></tr>` +
-      rows.map((r) => `<tr><td>${esc(r.ts)}</td><td>${esc(r.tool)}</td>
-        <td class="${r.decision}">${esc(r.decision)}</td><td>${esc(r.source)}</td><td>${esc(r.mode)}</td></tr>`).join('') +
-      `</table>`
-    : '<div class="empty">Nothing audited yet.</div>'
+function approvalCard(p, withBot = false) {
+  return `<div class="card">
+    <h4>${withBot ? esc(p.bot) + ' wants' : 'Wants'} to run <code>${esc(p.tool)}</code></h4>
+    <div class="who">${esc(p.reason || '')}</div>
+    <pre>${esc(JSON.stringify(p.input, null, 2)).slice(0, 4000)}</pre>
+    <div class="actions">
+      <button class="primary" data-approve="${p.id}">Approve</button>
+      <button class="danger" data-deny="${p.id}">Deny</button>
+      <input type="text" data-amend="${p.id}" placeholder="…or say what to change" />
+    </div></div>`
+}
+
+function wireCards() {
+  for (const b of document.querySelectorAll('[data-approve]')) b.onclick = () => decide(b.dataset.approve, 'allow')
+  for (const b of document.querySelectorAll('[data-deny]')) b.onclick = () => decide(b.dataset.deny, 'deny')
+  for (const input of document.querySelectorAll('[data-amend]')) {
+    input.onkeydown = (e) => {
+      if (e.key !== 'Enter' || !input.value.trim()) return
+      amend(input.dataset.amend, input.value.trim())
+    }
+  }
 }
 
 async function decide(id, decision) {
@@ -152,17 +196,331 @@ async function decide(id, decision) {
   render()
 }
 
-function push(botId, who, text) {
-  if (!botId) return
-  const t = threads.get(botId) || []
-  t.push({ who, text })
-  threads.set(botId, t)
+// An amendment is a denial carrying an instruction: the bot makes the change
+// and asks again, so you see the real payload before it runs.
+async function amend(id, instruction) {
+  const r = await api('/api/approve', { method: 'POST', body: JSON.stringify({ id, decision: 'amend', instruction }) })
+  state.pending = state.pending.filter((p) => p.id !== id)
+  push(current, 'sys', r.settled ? `sent back: ${instruction}` : 'too late — that request had already expired (denied)')
+  render()
 }
 
-function render() { renderBots(); renderThread() }
+function push(botId, who, text) {
+  if (!botId) return
+  thread(botId).push({ who, text })
+}
+
+// ---- live checklist -------------------------------------------------------
+
+function checklistFor(botId, create) {
+  const t = thread(botId)
+  const last = t.at(-1)
+  if (last && last.checklist && !last.closed) return last
+  if (!create) return undefined
+  const fresh = { checklist: [], closed: false }
+  t.push(fresh)
+  return fresh
+}
+
+function onActivity(d) {
+  if (d.kind === 'start') return void checklistFor(d.bot, true)
+  const list = checklistFor(d.bot, true)
+  if (d.kind === 'tool') list.checklist.push({ name: d.name, status: 'run' })
+  if (d.kind === 'warning') list.checklist.push({ name: d.text, status: 'deny' })
+  if (d.kind === 'end') {
+    list.closed = true
+    // An empty checklist is noise: the reply says everything.
+    if (!list.checklist.length) thread(d.bot).splice(thread(d.bot).indexOf(list), 1)
+  }
+}
+
+function markTool(botId, tool, status) {
+  const list = checklistFor(botId, false)
+  const row = list && [...list.checklist].reverse().find((s) => s.name === tool)
+  if (row) row.status = status
+  else if (list) list.checklist.push({ name: tool, status })
+}
+
+// ---- approvals inbox, audit, routines -------------------------------------
+
+function renderInbox() {
+  el('view').innerHTML = state.pending.length
+    ? state.pending.map((p) => approvalCard(p, true)).join('')
+    : '<div class="empty">Nothing is waiting on you.</div>'
+  wireCards()
+}
+
+let auditFilter = { decision: '', tool: '', scope: 'bot' }
+
+async function renderAudit() {
+  const params = new URLSearchParams({ limit: '300' })
+  if (auditFilter.scope === 'bot' && current) params.set('bot', current)
+  const { rows } = await api(`/api/audit?${params}`)
+  const shown = rows.filter((r) =>
+    (!auditFilter.decision || r.decision === auditFilter.decision) &&
+    (!auditFilter.tool || r.tool.toLowerCase().includes(auditFilter.tool.toLowerCase())))
+  el('view').innerHTML = `
+    <div class="filters">
+      <select id="f-scope">
+        <option value="bot"${auditFilter.scope === 'bot' ? ' selected' : ''}>This bot</option>
+        <option value="all"${auditFilter.scope === 'all' ? ' selected' : ''}>Every bot</option>
+      </select>
+      <select id="f-decision">
+        <option value="">Any decision</option>
+        <option value="allow"${auditFilter.decision === 'allow' ? ' selected' : ''}>Allowed</option>
+        <option value="deny"${auditFilter.decision === 'deny' ? ' selected' : ''}>Denied</option>
+      </select>
+      <input type="text" id="f-tool" placeholder="tool contains…" value="${esc(auditFilter.tool)}" />
+      <span class="hint">${shown.length} of ${rows.length}</span>
+    </div>` + (shown.length
+      ? `<table><tr><th>when</th><th>bot</th><th>tool</th><th>decision</th><th>why</th><th>mode</th></tr>` +
+        shown.map((r) => `<tr><td>${esc(r.ts)}</td><td>${esc(r.bot)}</td><td>${esc(r.tool)}</td>
+          <td class="${r.decision}">${esc(r.decision)}</td>
+          <td>${esc(r.source)}${r.reason ? ` — ${esc(String(r.reason).slice(0, 120))}` : ''}</td>
+          <td>${esc(r.mode)}</td></tr>`).join('') + `</table>`
+      : '<div class="empty">Nothing matches.</div>')
+
+  el('f-scope').onchange = (e) => { auditFilter.scope = e.target.value; renderAudit() }
+  el('f-decision').onchange = (e) => { auditFilter.decision = e.target.value; renderAudit() }
+  el('f-tool').oninput = (e) => { auditFilter.tool = e.target.value; renderAudit() }
+}
+
+async function renderRoutines() {
+  const { rows } = await api(`/api/routines${current ? `?bot=${encodeURIComponent(current)}` : ''}`)
+  const defined = (detail && detail.routines) || []
+  el('view').innerHTML =
+    (defined.length
+      ? `<table><tr><th>routine</th><th>cron</th><th>prompt</th><th></th></tr>` +
+        defined.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.cron)}</td><td>${esc(r.prompt)}</td>
+          <td>${r.enabled ? '' : 'disabled'}</td></tr>`).join('') + '</table>'
+      : '<div class="hint">No routines in this bot’s bot.toml.</div>') +
+    (rows.length
+      ? `<table><tr><th>ran</th><th>bot</th><th>routine</th><th>occurrence</th><th>status</th><th>detail</th></tr>` +
+        rows.map((r) => `<tr><td>${esc(r.ran_at)}</td><td>${esc(r.bot)}</td><td>${esc(r.routine)}</td>
+          <td>${esc(r.occurrence)}</td><td class="${r.status}">${esc(r.status)}</td>
+          <td>${esc(String(r.detail ?? '').slice(0, 120))}</td></tr>`).join('') + '</table>'
+      : '<div class="empty">Nothing has fired yet.</div>')
+}
+
+// ---- bot screen -----------------------------------------------------------
+
+function renderScreen() {
+  const frame = frames.get(current)
+  const over = handedOver.has(current)
+  el('view').innerHTML = `
+    <div class="filters">
+      <button id="take-over" ${over ? 'disabled' : ''}>Take over</button>
+      <button id="hand-back" ${over ? '' : 'disabled'}>Hand back</button>
+      <span class="hint">${over
+        ? 'The window is yours — the bot will not touch this page until you hand it back.'
+        : 'Live view of this bot’s browser. Taking over opens the same session in a window you drive.'}</span>
+    </div>
+    <div class="screen">${frame
+      ? `<img alt="bot screen" src="data:image/jpeg;base64,${frame}" />`
+      : '<div class="idle">Nothing on this bot’s screen right now. Frames appear while it browses.</div>'}</div>`
+  el('take-over').onclick = () => browserControl('take-over')
+  el('hand-back').onclick = () => browserControl('hand-back')
+}
+
+async function browserControl(control) {
+  await api(`/api/preview/${encodeURIComponent(current)}/control`, { method: 'POST', body: JSON.stringify({ control }) })
+  if (control === 'take-over') handedOver.add(current)
+  else handedOver.delete(current)
+  renderScreen()
+}
+
+// ---- persona editor -------------------------------------------------------
+
+const PROVIDERS = ['claude', 'codex', 'anthropic-api', 'openai-api', 'xai-api', 'gemini-api', 'ollama']
+
+async function loadDetail() {
+  detail = current ? await api(`/api/bots/${encodeURIComponent(current)}`) : null
+}
+
+function renderSettings() {
+  if (editingNew) return renderNewBot()
+  if (!detail) return void el('view').innerHTML = '<div class="empty">Pick a bot.</div>'
+  const d = detail
+  const list = (a) => (a || []).join(', ')
+  el('view').innerHTML = `<div class="editor">
+    <label>Name<input type="text" id="e-name" value="${esc(d.name)}" /></label>
+    <label>Prompt<textarea id="e-prompt">${esc(d.prompt)}</textarea></label>
+
+    <fieldset><legend>Providers</legend>
+      <label>Ordered chain — the next one is tried only when a plan limit or a login problem stops the one before it
+        <input type="text" id="e-providers" value="${esc(list(d.providers))}" /></label>
+      <div class="hint">Known: ${PROVIDERS.join(', ')}</div>
+      <label>Model (API providers only)<input type="text" id="e-model" value="${esc(d.model || '')}" placeholder="e.g. claude-sonnet-5" /></label>
+      <div class="inline"><label><input type="checkbox" id="e-metered" ${d.allowMeteredFailover ? 'checked' : ''} />
+        Allow failover onto a metered API key</label></div>
+    </fieldset>
+
+    <fieldset><legend>Hands</legend>
+      <div class="inline">
+        <label><input type="checkbox" id="e-memory" ${d.agentdaTools ? 'checked' : ''} /> Memory and scoped files</label>
+        <label><input type="checkbox" id="e-browser" ${d.browser ? 'checked' : ''} /> Browser</label>
+        <label><input type="checkbox" id="e-email" ${d.email ? 'checked' : ''} /> Email</label>
+      </div>
+      <label>Browser surface
+        <select id="e-surface">
+          <option value="shadow"${d.browserSurface === 'shadow' ? ' selected' : ''}>Shadow — invisible, nothing on your screen</option>
+          <option value="on-screen"${d.browserSurface === 'on-screen' ? ' selected' : ''}>On screen — a visible window you can watch</option>
+        </select></label>
+      <label>Directories it may touch (comma separated)<input type="text" id="e-scope" value="${esc(list(d.scope))}" /></label>
+    </fieldset>
+
+    <fieldset><legend>Gate</legend>
+      <label>Auto-approve these tools<input type="text" id="e-auto" value="${esc(list(d.autoApprove))}" /></label>
+      <label>Always ask, even in Auto<input type="text" id="e-always" value="${esc(list(d.alwaysAsk))}" /></label>
+      <div class="inline">
+        <label>Turns per day<input type="number" id="e-daily" value="${d.dailyTurnCap ?? ''}" style="width:7em" /></label>
+        <label>per week<input type="number" id="e-weekly" value="${d.weeklyTurnCap ?? ''}" style="width:7em" /></label>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>Telegram identity</legend>
+      ${d.ownIdentity
+        ? `<div class="hint">This bot has its own BotFather token, so it speaks under its own name.</div>
+           <div class="inline"><button id="e-untoken" class="danger">Remove its token</button></div>`
+        : `<div class="hint">Right now this bot speaks through the daemon's shared token. Give it its own from
+             @BotFather (/newbot) and it gets its own name and avatar. The token is stored outside the bot
+             folder, so the folder stays safe to share.</div>
+           <div class="inline"><input type="text" id="e-token" placeholder="123456789:AA…" style="flex:1" />
+             <button id="e-settoken">Add token</button></div>`}
+    </fieldset>
+
+    <div class="inline">
+      <button class="primary" id="e-save">Save</button>
+      <button class="danger" id="e-archive">Archive this bot</button>
+      <span class="hint">Files live in ${esc(d.dir)}</span>
+    </div>
+  </div>`
+
+  const csv = (id) => el(id).value.split(',').map((s) => s.trim()).filter(Boolean)
+  const num = (id) => (el(id).value === '' ? null : Number(el(id).value))
+
+  el('e-save').onclick = async () => {
+    const r = await api(`/api/bots/${encodeURIComponent(current)}`, { method: 'POST', body: JSON.stringify({
+      name: el('e-name').value,
+      prompt: el('e-prompt').value,
+      providers: csv('e-providers'),
+      model: el('e-model').value || null,
+      allowMeteredFailover: el('e-metered').checked,
+      agentdaTools: el('e-memory').checked,
+      browser: el('e-browser').checked,
+      email: el('e-email').checked,
+      browserSurface: el('e-surface').value,
+      scope: csv('e-scope'),
+      autoApprove: csv('e-auto'),
+      alwaysAsk: csv('e-always'),
+      dailyTurnCap: num('e-daily'),
+      weeklyTurnCap: num('e-weekly'),
+    }) })
+    if (r.error) return alert(r.error)
+    await refresh()
+    await loadDetail()
+    render()
+  }
+
+  el('e-archive').onclick = async () => {
+    if (!confirm(`Archive ${d.name}? Its folder — memory included — moves to .trash and stays on disk.`)) return
+    const r = await api(`/api/bots/${encodeURIComponent(current)}`, { method: 'DELETE' })
+    if (r.error) return alert(r.error)
+    alert(`Moved to ${r.archivedTo}`)
+    current = null
+    detail = null
+    view = 'chat'
+    await refresh()
+  }
+
+  if (el('e-settoken')) el('e-settoken').onclick = async () => {
+    const r = await api(`/api/bots/${encodeURIComponent(current)}/token`, { method: 'POST', body: JSON.stringify({ token: el('e-token').value }) })
+    if (r.error) return alert(r.error)
+    await refresh(); await loadDetail(); render()
+  }
+  if (el('e-untoken')) el('e-untoken').onclick = async () => {
+    await api(`/api/bots/${encodeURIComponent(current)}/token`, { method: 'DELETE' })
+    await refresh(); await loadDetail(); render()
+  }
+}
+
+function renderNewBot() {
+  el('view').innerHTML = `<div class="editor">
+    <label>Id — lowercase, no spaces; this is the folder name and how you address it in chat
+      <input type="text" id="n-id" placeholder="scout" /></label>
+    <label>Name<input type="text" id="n-name" placeholder="Scout" /></label>
+    <label>Provider chain<input type="text" id="n-providers" value="claude" /></label>
+    <label>Prompt<textarea id="n-prompt">You are a careful assistant.</textarea></label>
+    <div class="inline"><button class="primary" id="n-create">Create</button><button id="n-cancel">Cancel</button></div>
+  </div>`
+  el('n-create').onclick = async () => {
+    const r = await api('/api/bots', { method: 'POST', body: JSON.stringify({
+      id: el('n-id').value.trim(),
+      name: el('n-name').value.trim() || undefined,
+      providers: el('n-providers').value.split(',').map((s) => s.trim()).filter(Boolean),
+      prompt: el('n-prompt').value,
+    }) })
+    if (r.error) return alert(r.error)
+    editingNew = false
+    current = r.bot
+    await refresh()
+    await loadDetail()
+    render()
+  }
+  el('n-cancel').onclick = () => { editingNew = false; render() }
+}
+
+// ---- shell ----------------------------------------------------------------
+
+function render() {
+  renderBots()
+  const b = bot()
+  el('title').textContent = b ? b.name : '—'
+  el('mode-toggle').textContent = b ? (state.paused ? 'PAUSED' : b.mode.toUpperCase()) : ''
+  el('mode-toggle').className = `tag ${b && b.mode === 'auto' && !state.paused ? 'auto' : ''}`
+  el('mode-toggle').style.display = b ? '' : 'none'
+  el('composer').style.display = b && view === 'chat' ? 'flex' : 'none'
+  for (const tab of document.querySelectorAll('[data-view]')) tab.setAttribute('aria-current', String(tab.dataset.view === view))
+  if (!b && view !== 'settings') return void (el('view').innerHTML = '<div class="empty">Pick a bot.</div>')
+  if (view === 'chat') return renderChat()
+  if (view === 'inbox') return renderInbox()
+  if (view === 'audit') return renderAudit()
+  if (view === 'routines') return renderRoutines()
+  if (view === 'screen') return renderScreen()
+  if (view === 'settings') return renderSettings()
+}
 
 async function refresh() {
   state = await api('/api/state')
+  el('pause').textContent = state.paused ? 'Resume' : 'Pause'
+  render()
+}
+
+for (const tab of document.querySelectorAll('[data-view]')) {
+  tab.onclick = async () => {
+    view = tab.dataset.view
+    if ((view === 'settings' || view === 'routines') && current) await loadDetail()
+    render()
+  }
+}
+
+el('new-bot').onclick = () => { editingNew = true; view = 'settings'; render() }
+
+el('mode-toggle').onclick = async () => {
+  const b = bot()
+  if (!b) return
+  const next = b.mode === 'auto' ? 'ask' : 'auto'
+  if (next === 'auto' && !confirm(
+    `Put ${b.name} in AUTO?\n\nIt will run gated actions without asking — except the always-ask list, which keeps asking. Everything is still audited, budgets still apply, and Pause drops it straight back to Ask.`,
+  )) return
+  await api('/api/mode', { method: 'POST', body: JSON.stringify({ bot: b.id, mode: next }) })
+  await refresh()
+}
+
+el('pause').onclick = async () => {
+  const r = await api('/api/pause', { method: 'POST', body: JSON.stringify({ on: !state.paused }) })
+  state.paused = r.paused
+  el('pause').textContent = state.paused ? 'Resume' : 'Pause'
   render()
 }
 
@@ -178,24 +536,69 @@ el('composer').onsubmit = async (e) => {
   await api('/api/send', { method: 'POST', body: JSON.stringify({ bot: current, text }) })
 }
 
-el('pause').onclick = async () => {
-  const r = await api('/api/pause', { method: 'POST', body: JSON.stringify({ on: !state.paused }) })
-  state.paused = r.paused
-  el('pause').textContent = state.paused ? 'Resume' : 'Pause'
-  render()
-}
-el('tab-chat').onclick = () => { view = 'chat'; render() }
-el('tab-audit').onclick = () => { view = 'audit'; render() }
+// ---- mic ------------------------------------------------------------------
 
-// Live updates: approvals arriving while you watch, without polling.
+let recorder
+el('mic').onclick = async () => {
+  if (recorder && recorder.state === 'recording') return recorder.stop()
+  if (!current) return
+  let stream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  } catch (err) {
+    return void push(current, 'sys', `no microphone: ${err.message}`) || render()
+  }
+  const chunks = []
+  recorder = new MediaRecorder(stream)
+  recorder.ondataavailable = (e) => chunks.push(e.data)
+  recorder.onstop = async () => {
+    for (const track of stream.getTracks()) track.stop()
+    el('mic').classList.remove('rec')
+    const r = await fetch(`/api/voice?bot=${encodeURIComponent(current)}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/octet-stream' },
+      body: new Blob(chunks),
+    }).then((x) => x.json())
+    // What was heard is shown before it does anything — especially when what
+    // was heard is "yes" to an approval card.
+    push(current, r.error ? 'sys' : 'me', r.error || `🎤 ${r.text}`)
+    render()
+  }
+  recorder.start()
+  el('mic').classList.add('rec')
+}
+
+// ---- live updates ---------------------------------------------------------
+
 const es = new EventSource(`/api/events?token=${TOKEN}`)
-es.addEventListener('approval', (e) => { state.pending.push(JSON.parse(e.data)); render() })
+es.addEventListener('approval', (e) => {
+  const d = JSON.parse(e.data)
+  state.pending.push(d)
+  markTool(d.bot, d.tool, 'wait')
+  render()
+})
 es.addEventListener('resolved', (e) => {
-  const { id } = JSON.parse(e.data)
-  state.pending = state.pending.filter((p) => p.id !== id)
+  const d = JSON.parse(e.data)
+  const req = state.pending.find((p) => p.id === d.id)
+  if (req) markTool(req.bot, req.tool, d.decision === 'allow' ? 'ok' : 'deny')
+  state.pending = state.pending.filter((p) => p.id !== d.id)
   render()
 })
 es.addEventListener('message-out', (e) => { const d = JSON.parse(e.data); push(d.bot, 'bot', d.text); render() })
+es.addEventListener('message-in', (e) => { const d = JSON.parse(e.data); push(d.bot, 'me', d.text); render() })
+es.addEventListener('activity', (e) => { onActivity(JSON.parse(e.data)); render() })
+es.addEventListener('bots', () => refresh())
+es.addEventListener('frame', (e) => {
+  const d = JSON.parse(e.data)
+  frames.set(d.bot, d.jpeg)
+  if (view === 'screen' && d.bot === current) renderScreen()
+})
+es.addEventListener('browser-control', (e) => {
+  const d = JSON.parse(e.data)
+  if (d.control === 'take-over') handedOver.add(d.bot)
+  else handedOver.delete(d.bot)
+  if (view === 'screen') renderScreen()
+})
 
 refresh()
 setInterval(refresh, 15000) // catches anything the stream missed

@@ -106,13 +106,17 @@ Each of these is a persona folder: prompt, tools, routines, gates. The daemon do
 
 ## Project status
 
-Alpha, and Phases 0 through 3 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, a second and third provider with failover, the desktop app, three chat bridges on one shared set of rules, and tool packs.
+Alpha, and Phases 0 through 4 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, a second and third provider with failover, the desktop app, three chat bridges on one shared set of rules, tool packs, recorded routines you can read before they run, and a containerised desktop for work a browser cannot reach.
 
 What has actually been run, and when, is written down rather than implied. Against the real `claude` CLI on 2026-08-13: gated actions block and only run on approval, denials stop the action, unanswered approvals time out to deny, Auto mode runs unattended while the always-ask list still blocks, memory survives a restart, a bot browses a real page with zero windows on screen, and two bots complete a task with a visible handoff and stop at the cap. Against a local Ollama model and real Chromium on 2026-08-18: an approval card streams to the desktop with its payload and runs only once approved, a typed amendment comes back as a revised card with the corrected payload, screencast frames reach the window and take-over refuses the bot the page, and every shipped tool pack was launched and checked against what it actually exposes.
 
 What is built but has never met the real service says so, in [PLAN.md](PLAN.md) and in [USER_REQUEST.md](USER_REQUEST.md): a live Telegram run, the email recipe, Slack, Discord, voice transcription on real audio, and the hosted API providers. Each needs one credential or one install, and none of them blocks anything else.
 
-Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Phase 4 is next: full desktop hands on an isolated virtual desktop, and watch-and-learn.
+Watch-and-learn ships too: record yourself doing a task once and the bot writes it down as a script you read before it ever runs, then replays it on a schedule — stopping for you at every step that matters, and handing you the browser when it cannot go on ([docs](docs/watch-and-learn.md)). OS-level work defaults to a Linux desktop in a container rather than yours: 0.8 seconds to start, measured, and watchable live ([ADR 0008](docs/adr/0008-virtual-desktop.md)).
+
+One Phase 4 item is deliberately not built: driving your *real* desktop. It is the most dangerous thing in this product, and the parts that would make it safe — an always-on-top stop control and auto-pause the moment you touch the keyboard — have to be verified with a human at the machine, not merely written.
+
+Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Phase 5 is next: off the laptop, a phone-native app, and small-team use.
 
 ## Quickstart
 

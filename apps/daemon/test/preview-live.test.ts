@@ -29,6 +29,7 @@ const persona = (id: string, dir: string): Persona => ({
   tools: [],
   agentdaTools: true,
   browser: true,
+  desktop: false,
   email: false,
   browserSurface: 'shadow',
   scope: [],

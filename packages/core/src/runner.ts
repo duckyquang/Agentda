@@ -231,6 +231,12 @@ function toolBriefing(p: Persona, mcpConfig: string | undefined): string {
       '- `mcp__email__email_send`: sending is gated; the human sees the exact recipient, subject, and body first.',
     )
   }
+  if (p.desktop) {
+    lines.push(
+      '- `mcp__desktop__desktop_screenshot` / `desktop_where`: look at your own Linux desktop, running in a container. It is NOT the human\'s desktop and nothing you do there touches their screen.',
+      '- `mcp__desktop__desktop_launch` / `desktop_click` / `desktop_type` / `desktop_key`: drive it. Look before you click — you click at coordinates, so a screenshot first is not optional. Typing goes to whatever has focus, so click the window first.',
+    )
+  }
   if (p.browser) {
     lines.push(
       `- \`mcp__browser__browser_navigate\` / \`browser_read\` / \`browser_click\` / \`browser_type\` / \`browser_select\` / \`browser_screenshot\`: a real browser, running ${

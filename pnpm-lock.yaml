@@ -115,6 +115,15 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  packages/mcp-desktop:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.12.0
+        version: 1.30.0(zod@4.4.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   packages/mcp-email:
     dependencies:
       '@modelcontextprotocol/sdk':

@@ -160,6 +160,20 @@ const runner = new TurnRunner({
         ) as Record<string, string>,
       },
     }),
+    ...(p.desktop && {
+      desktop: {
+        command: process.execPath,
+        args: [tsxLoader, join(repoRoot, 'packages/mcp-desktop/src/index.ts')],
+        env: {
+          // The desktop's own state lives with the bot, so a login it does
+          // survives the container it was done in.
+          AGENTDA_DESKTOP_STATE: join(p.dir, 'desktop'),
+          AGENTDA_DESKTOP_CONTAINER: `agentda-desktop-${p.id}`,
+          ...(process.env.AGENTDA_DESKTOP_IMAGE ? { AGENTDA_DESKTOP_IMAGE: process.env.AGENTDA_DESKTOP_IMAGE } : {}),
+          PATH: process.env.PATH ?? '',
+        },
+      },
+    }),
     ...(p.browser && {
       browser: {
         command: process.execPath,

@@ -50,6 +50,7 @@ const persona = (over: Partial<Persona> = {}): Persona =>
     tools: [],
     agentdaTools: true,
     browser: false,
+  desktop: false,
     email: false,
     browserSurface: 'shadow',
     scope: ['/tmp/work'],

@@ -24,6 +24,7 @@ const persona = (routines: Persona['routines']): Persona => ({
   tools: [],
   agentdaTools: false,
   browser: false,
+  desktop: false,
   email: false,
   browserSurface: 'shadow' as const,
   scope: [],

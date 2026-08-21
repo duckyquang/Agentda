@@ -348,7 +348,10 @@ async function loadDetail() {
 
 function renderSettings() {
   if (editingNew) return renderNewBot()
-  if (!detail) return void el('view').innerHTML = '<div class="empty">Pick a bot.</div>'
+  if (!detail) {
+    el('view').innerHTML = '<div class="empty">Pick a bot.</div>'
+    return
+  }
   const d = detail
   const list = (a) => (a || []).join(', ')
   el('view').innerHTML = `<div class="editor">
@@ -507,7 +510,10 @@ function render() {
   el('mode-toggle').style.display = b ? '' : 'none'
   el('composer').style.display = b && view === 'chat' ? 'flex' : 'none'
   for (const tab of document.querySelectorAll('[data-view]')) tab.setAttribute('aria-current', String(tab.dataset.view === view))
-  if (!b && view !== 'settings') return void (el('view').innerHTML = '<div class="empty">Pick a bot.</div>')
+  if (!b && view !== 'settings') {
+    el('view').innerHTML = '<div class="empty">Pick a bot.</div>'
+    return
+  }
   if (view === 'chat') return renderChat()
   if (view === 'inbox') return renderInbox()
   if (view === 'audit') return renderAudit()
@@ -580,7 +586,9 @@ el('mic').onclick = async () => {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   } catch (err) {
-    return void push(current, 'sys', `no microphone: ${err.message}`) || render()
+    push(current, 'sys', `no microphone: ${err.message}`)
+    render()
+    return
   }
   const chunks = []
   recorder = new MediaRecorder(stream)

@@ -98,6 +98,10 @@ export class ControlApi {
         }
       }
 
+      // The browser asks for this on its own and has no token to offer; a 401
+      // here is a red console error on every page load for nothing.
+      if (req.method === 'GET' && url.pathname === '/favicon.ico') return void res.writeHead(204).end()
+
       // EventSource cannot set headers, so the stream authenticates by query
       // param. Same secret either way.
       const presented = req.headers.authorization?.replace(/^Bearer /, '') ?? url.searchParams.get('token')

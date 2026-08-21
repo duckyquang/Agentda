@@ -46,4 +46,16 @@ describe('owner pairing', () => {
     o.claim('telegram', o.mintCode('telegram'), 555)
     expect(o.isOwner('telegram', '555')).toBe(true)
   })
+
+  it('knows when a code is already waiting, so a later bridge does not print another', () => {
+    const o = fresh()
+    expect(o.hasUnusedCode('telegram')).toBe(false)
+    const code = o.mintCode('telegram')
+    expect(o.hasUnusedCode('telegram')).toBe(true)
+    // Per platform: a Discord bridge starting still needs its own.
+    expect(o.hasUnusedCode('discord')).toBe(false)
+    o.claim('telegram', code, 111)
+    expect(o.hasUnusedCode('telegram')).toBe(false)
+  })
 })
+

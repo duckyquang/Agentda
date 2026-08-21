@@ -8,6 +8,10 @@ export const DEFAULT_HANDOFF_CAP = 4
 
 export interface Handoff {
   chat: string
+  // Identifies ONE request, not the words it was made in. It used to be the
+  // user's raw message, and the count has no time bound — so asking the same
+  // thing on five different days spent the cap and disabled handoffs for that
+  // phrase for good.
   task: string
   from: string
   to: string
@@ -33,7 +37,7 @@ export function handoffCount(db: Db, chat: string, task: string): number {
 export function tryHandoff(db: Db, h: Handoff, cap = DEFAULT_HANDOFF_CAP): { ok: true } | { ok: false; reason: string } {
   const n = handoffCount(db, h.chat, h.task)
   if (n >= cap) {
-    return { ok: false, reason: `handoff cap reached (${cap} for task "${h.task}") — stopping and handing back to you` }
+    return { ok: false, reason: `handoff cap reached (${cap} hops on this request) — stopping and handing back to you` }
   }
   recordHandoff(db, h)
   return { ok: true }

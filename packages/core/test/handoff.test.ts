@@ -37,6 +37,30 @@ describe('multi-bot handoff cap', () => {
   })
 })
 
+describe('the cap is per request, not per phrase', () => {
+  it('does not spend the cap across separate requests that happen to read the same', () => {
+    const d = db()
+    // The task used to be the user's raw message, and the count has no time
+    // bound — so asking the same thing on five different days spent the cap and
+    // disabled handoffs for that phrase for good.
+    for (let request = 0; request < 5; request++) {
+      const r = tryHandoff(d, { chat: '42', task: `request-${request}`, from: 'chief', to: 'scout', note: 'have a look' })
+      expect(r.ok, `request ${request}`).toBe(true)
+    }
+  })
+
+  it('still stops two bots passing one request back and forth', () => {
+    const d = db()
+    const task = 'one-request'
+    const hops = Array.from({ length: DEFAULT_HANDOFF_CAP + 1 }, () =>
+      tryHandoff(d, { chat: '42', task, from: 'chief', to: 'scout', note: 'again' }),
+    )
+    expect(hops.filter((h) => h.ok)).toHaveLength(DEFAULT_HANDOFF_CAP)
+    expect(hops.at(-1)).toMatchObject({ ok: false })
+    expect((hops.at(-1) as { reason: string }).reason).toMatch(/hops on this request/)
+  })
+})
+
 describe('parsing handoffs out of a reply', () => {
   it('reads the trailing handoff lines and nothing above them', () => {
     expect(

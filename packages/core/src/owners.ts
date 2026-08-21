@@ -35,6 +35,15 @@ export class Owners {
     return (this.db.prepare('SELECT count(*) c FROM owners WHERE platform = ?').get(platform) as { c: number }).c
   }
 
+  // Whether a code is already waiting to be used on this platform. A bridge
+  // that starts later — a bot given its own token from the app — needs a code
+  // too, but it does not need a fresh one printed per bridge.
+  hasUnusedCode(platform: string): boolean {
+    return !!this.db
+      .prepare('SELECT 1 FROM pairing_codes WHERE platform = ? AND used_at IS NULL')
+      .get(platform)
+  }
+
   // A short, single-use code the human DMs to the bot to prove which account is
   // theirs. Short because it's typed by hand and lives for one pairing.
   mintCode(platform: string): string {

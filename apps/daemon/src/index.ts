@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -220,7 +220,7 @@ function sendToBot(botId: string, text: string): void {
   // Deliberately not awaited: the turn may pause on an approval for as long as
   // the human takes, and the UI shows that card meanwhile. Same path as a chat
   // message, so the desktop gets handoffs and provider notices too.
-  void enqueueTurn(p, `desktop:${botId}`, text, text)
+  void enqueueTurn(p, `desktop:${botId}`, text, randomUUID())
 }
 
 const api = new ControlApi({
@@ -329,7 +329,7 @@ function bridgeHost(bound?: string) {
     // Approve tap that same turn is waiting for, so every gated action would
     // time out to deny with the human staring at a card that does nothing.
     onMessage: async (persona: Persona, chat: string, text: string) => {
-      void enqueueTurn(persona, chat, stripAddress(text, persona), text)
+      void enqueueTurn(persona, chat, stripAddress(text, persona), randomUUID())
     },
     onCommand: (cmd: string, args: string, chat: string, reply: (s: string) => Promise<void>) =>
       handleCommand(cmd, args, chat, reply),
@@ -358,7 +358,19 @@ function withRoute(holder: { speaker?: Bridged }, host: ReturnType<typeof bridge
 
 function register(holder: { speaker?: Bridged }, speaker: Bridged, telegramKey?: string): Bridged {
   holder.speaker = speaker
+  announcePairing(speaker.platform)
   return speakers.add(speaker, telegramKey)
+}
+
+// A bot handle is public on every one of these platforms, so each one has to
+// learn which human is the owner. Announced when a bridge starts rather than
+// only at boot: a bot given its own token from the app starts its bridge
+// later, and without this it could never be paired and would answer nobody.
+function announcePairing(platform: string): void {
+  if (owners.count(platform) > 0 || owners.hasUnusedCode(platform)) return
+  console.log(
+    `\nPAIRING CODE (${platform}): ${owners.mintCode(platform)}\nSend this code to your bot on ${platform} to claim it. Until then it answers nobody.\n`,
+  )
 }
 
 function startTelegram(key: string, botToken: string, bound?: string): void {
@@ -509,7 +521,9 @@ const scheduler = new Scheduler(
   db,
   () => personas,
   async (persona, routineId, prompt) => {
-    const chat = chatFor.get(persona.id) ?? lastKnownChat()
+    // This bot's own chat only. Falling back to whatever chat some other bot
+    // last used posts one bot's routine output into another bot's thread.
+    const chat = chatFor.get(persona.id)
     // Nowhere to post is not success. Recording it as done would put a green
     // row in the ledger for a routine that never ran, and the ledger is the
     // only reason to believe at-most-once means anything.
@@ -520,14 +534,10 @@ const scheduler = new Scheduler(
     // activity stream, and handoffs, and so chatFor is set for the approval
     // card this run may raise. Awaited here — unlike a chat message — because
     // the ledger row is the outcome of this run.
-    await enqueueTurn(persona, chat, prompt, `routine:${routineId}`, { scheduled: true })
+    await enqueueTurn(persona, chat, prompt, `${routineId}:${randomUUID()}`, { scheduled: true })
     return { status: 'done' as const }
   },
 )
-
-function lastKnownChat(): string | undefined {
-  return chatFor.values().next().value
-}
 
 // Turns for one bot run one at a time, and never on the caller's stack.
 //
@@ -641,16 +651,6 @@ async function dispatchHandoffs(persona: Persona, chat: string, text: string, ta
 
 function stripAddress(text: string, p: Persona): string {
   return text.replace(new RegExp(`(^|\\s)@?${p.id}\\b[:,]?`, 'i'), ' ').trim() || text
-}
-
-// One pairing code per platform in use: a bot handle is public everywhere, so
-// every platform has to learn which human is the owner.
-for (const platform of speakers.platforms()) {
-  if (owners.count(platform) === 0) {
-    console.log(
-      `\nPAIRING CODE (${platform}): ${owners.mintCode(platform)}\nSend this code to your bot on ${platform} to claim it. Until then it answers nobody.\n`,
-    )
-  }
 }
 
 let shuttingDown = false

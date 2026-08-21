@@ -30,7 +30,7 @@ export {
   writeMemory,
 } from './persona'
 export { TurnRunner, type TurnResult } from './runner'
-export { Scheduler } from './scheduler'
+export { type RoutineOutcome, Scheduler } from './scheduler'
 export { Owners } from './owners'
 export { resolveInScope, safeMemoryName } from './scope'
 export {

@@ -506,12 +506,19 @@ async function handleCommand(cmd: string, args: string, chat: string, reply: (s:
 const scheduler = new Scheduler(
   db,
   () => personas,
-  async (persona, _routineId, prompt) => {
+  async (persona, routineId, prompt) => {
     const chat = chatFor.get(persona.id) ?? lastKnownChat()
-    if (!chat) return
-    const res = await runner.run(persona, chat, prompt, { scheduled: true })
-    const body = res.skipped ? `(routine skipped: ${res.skipped})` : res.error ? `routine error: ${res.error.message}` : res.text
-    if (body) await say(persona, chat, body)
+    // Nowhere to post is not success. Recording it as done would put a green
+    // row in the ledger for a routine that never ran, and the ledger is the
+    // only reason to believe at-most-once means anything.
+    if (!chat) {
+      return { status: 'error' as const, detail: 'no chat to post to yet — message this bot once so it knows where to reply' }
+    }
+    // Same path as a chat message, so a routine gets the live checklist, the
+    // activity stream, and handoffs, and so chatFor is set for the approval
+    // card this run may raise.
+    await runTurn(persona, chat, prompt, `routine:${routineId}`, { scheduled: true })
+    return { status: 'done' as const }
   },
 )
 
@@ -522,7 +529,13 @@ function lastKnownChat(): string | undefined {
 // One turn, plus the handoff chain it may start. A bot ends its turn with
 // `@other: do X` to pass work along; every hop is visible in the thread and
 // counted against the per-task cap, so two bots cannot ping-pong forever.
-async function runTurn(persona: Persona, chat: string, input: string, task: string, opts: { silent?: boolean } = {}): Promise<string> {
+async function runTurn(
+  persona: Persona,
+  chat: string,
+  input: string,
+  task: string,
+  opts: { silent?: boolean; scheduled?: boolean } = {},
+): Promise<string> {
   chatFor.set(persona.id, chat)
   // The desktop renders a live checklist off these, so they are emitted as the
   // turn happens rather than summarised at the end. Chat gets the same thing as
@@ -532,6 +545,7 @@ async function runTurn(persona: Persona, chat: string, input: string, task: stri
   if (list) liveLists.set(persona.id, list)
   const res = await runner
     .run(persona, chat, input, {
+      scheduled: opts.scheduled,
       onEvent: (e) => {
         if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
         if (e.type === 'tool_call') {
@@ -629,6 +643,11 @@ const shutdown = async (code = 0) => {
   console.log('\nshutting down…')
   scheduler.stop()
   queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
+  // Denying the open approvals is what lets a parked routine finish; give the
+  // ones already running a moment to write their ledger row, because the
+  // database is closed a few lines below and a write into a closed database
+  // throws.
+  await scheduler.drain(3000)
   await Promise.all(speakers.list().map((s) => s.stop().catch(() => {})))
   await hook.close().catch(() => {})
   await api.close().catch(() => {})

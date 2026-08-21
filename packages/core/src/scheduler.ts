@@ -6,13 +6,23 @@ import type { Persona } from './persona'
 // FR-34). We claim an occurrence in SQLite BEFORE running it, so a restart
 // cannot re-fire the same slot, and on wake we skip anything missed rather than
 // replaying a backlog — the default the plan committed to.
+export interface RoutineOutcome {
+  status: 'done' | 'error' | 'skipped'
+  detail?: string
+}
+
 export class Scheduler {
   private timer?: NodeJS.Timeout
+  // One run of a given routine at a time. Ticks overlap by design — a run that
+  // waits on a human takes as long as the human does — and without this a
+  // routine that runs longer than its own cron interval starts a fresh copy
+  // every interval and spends the user's plan window several times over.
+  private inflight = new Map<string, Promise<unknown>>()
 
   constructor(
     private db: Db,
     private personas: () => Persona[],
-    private runRoutine: (p: Persona, routineId: string, prompt: string) => Promise<void>,
+    private runRoutine: (p: Persona, routineId: string, prompt: string) => Promise<RoutineOutcome | void>,
     private intervalMs = 30_000,
   ) {}
 
@@ -35,6 +45,23 @@ export class Scheduler {
     return r.changes > 0
   }
 
+  get running(): number {
+    return this.inflight.size
+  }
+
+  // Waits for runs already in flight, bounded. Shutdown uses it: the database
+  // is closed at the end of it, and a routine still writing its ledger row when
+  // that happens throws on a closed database. Bounded, because a run parked on
+  // a human could otherwise hold the process open — the approval queue is
+  // denied first, which is what lets these finish at all.
+  async drain(timeoutMs = 5000): Promise<void> {
+    if (!this.inflight.size) return
+    await Promise.race([
+      Promise.allSettled([...this.inflight.values()]),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs).unref?.()),
+    ])
+  }
+
   async tick(now = new Date()): Promise<void> {
     for (const p of this.personas()) {
       for (const r of p.routines) {
@@ -54,13 +81,18 @@ export class Scheduler {
           this.claim(p.id, r.id, occurrence, 'skipped', 'missed while the machine was asleep or the daemon was down')
           continue
         }
+        const key = `${p.id}/${r.id}`
+        if (this.inflight.has(key)) continue // still running from an earlier tick
         if (!this.claim(p.id, r.id, occurrence, 'running')) continue // already claimed
-        try {
-          await this.runRoutine(p, r.id, r.prompt)
-          this.finish(p.id, r.id, occurrence, 'done')
-        } catch (err) {
-          this.finish(p.id, r.id, occurrence, 'error', (err as Error).message)
-        }
+
+        // Claimed synchronously above, so at-most-once holds; the run itself is
+        // not awaited, because a routine parked on an approval must not hold up
+        // every routine after it in this tick.
+        const run = this.runRoutine(p, r.id, r.prompt)
+          .then((outcome) => this.finish(p.id, r.id, occurrence, outcome?.status ?? 'done', outcome?.detail))
+          .catch((err: Error) => this.finish(p.id, r.id, occurrence, 'error', err.message))
+          .finally(() => this.inflight.delete(key))
+        this.inflight.set(key, run)
       }
     }
   }

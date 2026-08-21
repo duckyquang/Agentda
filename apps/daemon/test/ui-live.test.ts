@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ApprovalQueue, defaultPolicy, openDb, type Persona, type PersonaPatch } from '@agentda/core'
-import { type Browser, chromium, type Page } from 'playwright'
+import { type Browser, chromium, devices, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { ControlApi } from '../src/api'
 
@@ -255,6 +255,46 @@ describe.runIf(live)('desktop UI in a real browser', () => {
     await page.click('#r-review')
     await expect.poll(() => page.locator('#r-unreview').count(), { timeout: 10_000 }).toBe(1)
     expect(recordedSource).toContain('reviewed = true')
+  })
+
+  it('is usable on a phone, which is the only reason a mobile app is cheap', async () => {
+    // Measured before this was fixed: the 280px sidebar left the chat pane 77px
+    // wide, the approval card was narrower than its own Approve button, seven
+    // tabs stacked into a 392px header, and the page scrolled sideways. The app
+    // worked; the layout did not.
+    const phone = await browser.newContext({ ...devices['iPhone 15'] })
+    const small = await phone.newPage()
+    const errors: string[] = []
+    small.on('pageerror', (e) => errors.push(e.message))
+    await small.goto(api.url())
+    await small.waitForSelector('.bot')
+    await small.locator('.bot').first().click()
+
+    const pending = queue.request(
+      { bot: 'chief', chat: 'desktop:chief', tool: 'mcp__email__email_send', input: { to: 'anna@example.com' } },
+      { ...defaultPolicy(), grants: ['*'] },
+    )
+    await new Promise((r) => setImmediate(r))
+    const req = queue.open()[0]
+    api.emit('approval', { id: req.id, bot: req.bot, tool: req.tool, input: req.input, reason: req.reason })
+    await small.waitForSelector('.card')
+
+    const width = await small.evaluate('window.innerWidth')
+    const overflow = await small.evaluate('document.documentElement.scrollWidth - document.documentElement.clientWidth')
+    expect(overflow).toBe(0) // nothing scrolls sideways
+
+    const card = (await small.locator('.card').first().boundingBox())!
+    // The card is the thing you came to the phone for. It gets the screen.
+    expect(card.width).toBeGreaterThan((width as number) * 0.8)
+
+    const header = (await small.locator('header').boundingBox())!
+    expect(header.height).toBeLessThan(120)
+
+    // And it still works, not just fits.
+    await small.click(`[data-approve="${req.id}"]`)
+    await expect(pending).resolves.toMatchObject({ decision: 'allow' })
+    expect(errors).toEqual([])
+    await phone.close()
   })
 })
 

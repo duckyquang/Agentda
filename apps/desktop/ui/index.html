@@ -80,6 +80,30 @@
   .screen { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .screen img { display: block; width: 100%; }
   .screen .idle { color: var(--dim); padding: 40px; text-align: center; }
+
+  /* On a phone the 280px sidebar left the chat pane 77px wide and the approval
+     card narrower than its own button, while seven tabs stacked into a 392px
+     header. Measured, not guessed. Below this width the sidebar becomes a strip
+     of bots along the top and everything else gets the whole screen. */
+  @media (max-width: 700px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+    .bots { display: flex; overflow-x: auto; overflow-y: hidden; flex: none; }
+    .bot { flex: 0 0 auto; min-width: 46vw; border-bottom: 0; border-right: 1px solid var(--line); }
+    .newbot { border-top: 0; }
+    /* Tabs scroll sideways rather than stacking: a header taller than the
+       content it labels is not a header. */
+    header { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 8px 12px; }
+    header button, header .tag { flex: 0 0 auto; }
+    header strong { flex: 0 0 auto; }
+    header .grow { display: none; }
+    #view { padding: 12px; }
+    .msg, .card, .checklist, .editor { max-width: 100%; }
+    .card .actions { flex-direction: column; align-items: stretch; }
+    .card input[type=text] { min-width: 0; }
+    form.composer { padding: 10px 12px; }
+    table { font-size: 11px; }
+  }
 </style>
 </head>
 <body>

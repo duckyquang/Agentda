@@ -55,6 +55,17 @@ export type BrowserControl = 'take-over' | 'hand-back' | null
 
 const UI_DIR = fileURLToPath(new URL('../../desktop/ui', import.meta.url))
 
+const ALLOWED_HOSTS = [
+  '127.0.0.1',
+  'localhost',
+  '[::1]',
+  '::1',
+  ...(process.env.AGENTDA_API_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean),
+]
+
 export class ControlApi {
   readonly token = randomBytes(24).toString('hex')
   // A separate, narrower secret per bot, handed to that bot's browser server so
@@ -91,13 +102,17 @@ export class ControlApi {
       const json = (code: number, body: unknown) =>
         res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(body))
 
-      // Only loopback names may talk to us. Without this a page on the open
-      // internet could DNS-rebind to 127.0.0.1, read the token off `/`, and
-      // then answer approvals — the gate's own server avoids this with a random
-      // port plus a path secret, and this one needs the equivalent.
+      // Only names we expect may talk to us. Without this a page on the open
+      // internet could DNS-rebind to 127.0.0.1 and then answer approvals — the
+      // gate's own server avoids that with a random port plus a path secret,
+      // and this one needs the equivalent.
+      //
+      // Loopback by default. A cloud box or a tailnet address has to be named
+      // explicitly, because a wildcard here is how a private daemon becomes a
+      // public one by accident.
       const host = (req.headers.host ?? '').split(':')[0]
-      if (host && !['127.0.0.1', 'localhost', '[::1]', '::1'].includes(host)) {
-        return void json(403, { error: 'loopback only' })
+      if (host && !ALLOWED_HOSTS.includes(host)) {
+        return void json(403, { error: `this daemon only answers to ${ALLOWED_HOSTS.join(', ')} — set AGENTDA_API_HOSTS to add one` })
       }
 
       // The browser asks for this on its own and has no token to offer; a 401
@@ -388,15 +403,19 @@ export class ControlApi {
   }
 
   async listen(preferred = Number(process.env.AGENTDA_API_PORT ?? 4599)): Promise<number> {
+    // Loopback unless told otherwise. Inside a container that means nothing can
+    // reach it, which is why the cloud image sets this — a container is its own
+    // network namespace, and what the host publishes is the operator's call.
+    const bind = process.env.AGENTDA_API_BIND ?? '127.0.0.1'
     // If the preferred port is taken (another daemon, or anything else), take
     // any free one rather than refusing to start.
     await new Promise<void>((resolve, reject) => {
       const onError = (err: NodeJS.ErrnoException) => {
         if (err.code !== 'EADDRINUSE') return reject(err)
-        this.server.listen(0, '127.0.0.1', resolve)
+        this.server.listen(0, bind, resolve)
       }
       this.server.once('error', onError)
-      this.server.listen(preferred, '127.0.0.1', () => {
+      this.server.listen(preferred, bind, () => {
         this.server.off('error', onError)
         resolve()
       })

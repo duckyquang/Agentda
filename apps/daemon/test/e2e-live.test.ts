@@ -67,7 +67,6 @@ function harness(personas: Persona[], opts: { answer?: 'allow' | 'deny' | 'never
       queue,
       hook,
       adapters: new Map([['claude', new ClaudeAdapter()]]),
-      settingsPath: hook.writeSettings(join(root, 'run')),
       mcpEntries: (p) => ({
         agentda: {
           command: process.execPath,

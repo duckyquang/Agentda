@@ -4,6 +4,10 @@ dist/
 *.log
 .DS_Store
 
+# A bot's browser profile: its cookies and its logged-in sessions. It lives in
+# the bot directory, and bot directories are meant to be shared.
+browser-profile/
+
 # Local secrets: Telegram token, mailbox credentials. Never commit.
 .env*.local
 .env

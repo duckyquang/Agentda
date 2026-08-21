@@ -159,12 +159,15 @@ server.tool('browser_read', 'Read the current page as text, with the interactive
 
 server.tool(
   'browser_click',
-  'Click an element by CSS selector or visible text. Gated: a click can submit or purchase.',
+  'Click one element by CSS selector or visible text. Gated: a click can submit or purchase. The selector must match exactly one element — if it matches several, this fails and lists them, so narrow it rather than guessing.',
   { selector: z.string().describe('CSS selector, or text="..." to match visible text') },
   async ({ selector }) => {
     assertNotHandedOver()
     const p = await getPage()
-    await p.locator(selector.startsWith('text=') ? selector : selector).first().click({ timeout: 15_000 })
+    // No .first(): a selector matching three things and silently clicking the
+    // first is a click the human approved for a different element. Playwright's
+    // strict mode raises instead, and its message names the candidates.
+    await p.locator(selector).click({ timeout: 15_000 })
     await p.waitForLoadState('domcontentloaded').catch(() => {})
     return { content: [{ type: 'text', text: `clicked ${selector} — now at ${p.url()}` }] }
   },
@@ -172,12 +175,14 @@ server.tool(
 
 server.tool(
   'browser_type',
-  'Type into a field. Gated: typing usually precedes a submit.',
+  'Type into one field. Gated: typing usually precedes a submit. The selector must match exactly one element.',
   { selector: z.string(), text: z.string(), submit: z.boolean().optional() },
   async ({ selector, text, submit }) => {
     assertNotHandedOver()
     const p = await getPage()
-    const el = p.locator(selector).first()
+    // Same reason as the click: typing into whichever field happened to be
+    // first is how a password lands in a search box.
+    const el = p.locator(selector)
     await el.fill(text, { timeout: 15_000 })
     if (submit) await el.press('Enter')
     return { content: [{ type: 'text', text: `typed into ${selector}${submit ? ' and submitted' : ''}` }] }

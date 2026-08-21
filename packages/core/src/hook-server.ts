@@ -23,18 +23,29 @@ export class HookServer {
 
   constructor(
     private queue: ApprovalQueue,
-    private resolveContext: (sessionId: string) => { bot: string; chat: string | null; policy: BotPolicy; paused: boolean },
+    private resolveContext: (sessionId: string, bot?: string) => { bot: string; chat: string | null; policy: BotPolicy; paused: boolean },
     private secret: string,
   ) {
     this.server = createServer((req, res) => {
       // The path carries which provider is asking, because they disagree about
-      // how to say yes (see below).
-      const match = req.url?.match(new RegExp(`^/hook/${this.secret}/(claude|codex)$`))
+      // how to say yes (see below), and which bot is asking, because the
+      // session id cannot answer that.
+      //
+      // The bot has to come from the URL. A session id is only known to us
+      // once a turn produces a result, which is the END of the turn — so on a
+      // session's first tool call there is nothing to look it up in, and the
+      // fallback used to be "the first bot loaded". A tool from a bot granted
+      // nothing, in Ask mode, was then evaluated against another bot's Auto
+      // policy, ran unattended, and landed in the audit log under that bot's
+      // name. The settings file each turn hands its CLI carries the bot's id,
+      // so the gate always knows who is asking.
+      const match = req.url?.match(new RegExp(`^/hook/${this.secret}/(claude|codex)(?:/([^/]+))?$`))
       if (!match || req.method !== 'POST') {
         res.writeHead(404).end()
         return
       }
       const provider = match[1] as 'claude' | 'codex'
+      const bot = match[2] ? decodeURIComponent(match[2]) : undefined
       let body = ''
       req.on('data', (c) => {
         if (body.length < 1_000_000) body += c
@@ -43,7 +54,7 @@ export class HookServer {
         let verdict: { decision: 'allow' | 'deny'; reason?: string }
         try {
           const payload = JSON.parse(body)
-          const ctx = this.resolveContext(payload.session_id)
+          const ctx = this.resolveContext(payload.session_id, bot)
           const r = await this.queue.request(
             { bot: ctx.bot, chat: ctx.chat, tool: payload.tool_name, input: payload.tool_input },
             ctx.policy,
@@ -94,13 +105,14 @@ export class HookServer {
   // Returns the settings path Claude Code loads with --settings. The shim it
   // writes is also what Codex needs (as a bare command path), so both providers
   // are served from one call — see shimPath().
-  writeSettings(dir?: string, provider: 'claude' | 'codex' = 'claude'): string {
+  writeSettings(dir?: string, provider: 'claude' | 'codex' = 'claude', bot?: string): string {
     const d = dir ?? mkdtempSync(join(tmpdir(), 'agentda-hook-'))
     mkdirSync(d, { recursive: true }) // callers pass a path that may not exist yet
     const shim = join(d, `gate-${provider}.sh`)
     const client = join(d, `gate-${provider}.mjs`)
     const timeoutSec = Math.ceil(this.queue.timeoutMs / 1000) + 30
-    const url = `http://127.0.0.1:${this.port}/hook/${this.secret}/${provider}`
+    // Written per turn, so the bot in the path is the bot whose turn it is.
+    const url = `http://127.0.0.1:${this.port}/hook/${this.secret}/${provider}${bot ? `/${encodeURIComponent(bot)}` : ''}`
 
     // The client is Node rather than curl. Node is guaranteed present (the
     // daemon runs on it) and behaves identically everywhere, whereas curl's
@@ -162,8 +174,8 @@ process.stdin.on('end', async () => {
   }
 
   // Codex takes the hook as a command path rather than a settings file.
-  shimPath(dir: string, provider: 'claude' | 'codex' = 'codex'): string {
-    this.writeSettings(dir, provider)
+  shimPath(dir: string, provider: 'claude' | 'codex' = 'codex', bot?: string): string {
+    this.writeSettings(dir, provider, bot)
     return join(dir, `gate-${provider}.sh`)
   }
 }

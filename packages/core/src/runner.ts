@@ -40,8 +40,6 @@ export class TurnRunner {
       hook: HookServer
       adapters: Map<string, ProviderAdapter>
       guardrails?: Guardrails
-      settingsPath: string
-      codexShim?: string
       // The global pause switch: an AUTO bot must stop auto-approving the
       // moment the owner pauses, on every provider.
       isPaused?: () => boolean
@@ -98,6 +96,12 @@ export class TurnRunner {
     if (!adapter) return { text: '', toolCalls: [], error: { kind: 'other', message: `no adapter for ${providerName}` } }
 
     const runDir = mkdtempSync(join(tmpdir(), 'agentda-run-'))
+    // The gate's settings are written per turn so the hook URL names the bot
+    // whose turn this is. A session id cannot identify the bot on its first
+    // tool call — it does not exist until the turn ends — and guessing there
+    // meant one bot's action being judged by another bot's policy.
+    const settingsPath = this.deps.hook.writeSettings(runDir, 'claude', persona.id)
+    const codexShim = this.deps.hook.shimPath(runDir, 'codex', persona.id)
     const memory = readMemory(persona)
     const mcpConfig = this.materializeMcpConfig(persona, runDir)
     const systemFile = join(runDir, 'system.md')
@@ -119,11 +123,11 @@ export class TurnRunner {
         resume,
         tools: persona.tools,
         mcpConfig,
-        settings: this.deps.settingsPath,
+        settings: settingsPath,
         appendSystemPromptFile: systemFile,
         // Codex takes its gate as a command path and its persona inline, since
         // it has no --append-system-prompt-file (ADR 0003).
-        hookCommand: this.deps.codexShim,
+        hookCommand: codexShim,
         systemPromptFile: systemFile,
         cwd: persona.dir,
         model: persona.model,
@@ -217,7 +221,7 @@ function toolBriefing(p: Persona, mcpConfig: string | undefined): string {
   }
   if (p.browser) {
     lines.push(
-      `- \`mcp__browser__navigate\` / \`read\` / \`click\` / \`type\` / \`screenshot\`: a real browser, running ${
+      `- \`mcp__browser__browser_navigate\` / \`browser_read\` / \`browser_click\` / \`browser_type\` / \`browser_screenshot\`: a real browser, running ${
         p.browserSurface === 'shadow' ? 'invisibly in the background' : 'in a visible window'
       }. Read the page before clicking; selectors you did not read are guesses.`,
     )

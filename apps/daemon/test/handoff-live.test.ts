@@ -62,7 +62,6 @@ describe.runIf(live)('multi-bot handoff', () => {
       queue,
       hook,
       adapters: new Map([['claude', new ClaudeAdapter()]]),
-      settingsPath: hook.writeSettings(join(root, 'run')),
       mcpEntries: (p) => ({
         agentda: {
           command: process.execPath,

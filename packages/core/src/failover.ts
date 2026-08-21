@@ -35,6 +35,10 @@ export function nextProvider(
   opts: { allowMetered?: boolean } = {},
 ): FailoverStep | undefined {
   const i = chain.findIndex((c) => c.provider === from)
+  // A provider that is not in the chain has no "next": slicing from -1 + 1
+  // would hand the work to the FIRST provider, which is either the one that
+  // just failed or a metered one nobody opted into.
+  if (i === -1) return undefined
   for (const choice of chain.slice(i + 1)) {
     if (choice.metered && !opts.allowMetered) {
       return {

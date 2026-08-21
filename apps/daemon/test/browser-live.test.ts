@@ -49,7 +49,6 @@ function harness(root: string, persona: ReturnType<typeof loadPersonas>[number],
       queue,
       hook,
       adapters: new Map([['claude', new ClaudeAdapter()]]),
-      settingsPath: hook.writeSettings(join(root, 'run')),
       mcpEntries: (p) => ({
         browser: {
           command: process.execPath,

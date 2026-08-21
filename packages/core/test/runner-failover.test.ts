@@ -47,7 +47,6 @@ function setup(chainToml: string, adapters: Record<string, ProviderAdapter>) {
     queue,
     hook: new HookServer(queue, () => ({ bot: 'bot', chat: null, policy: persona.policy, paused: false }), 's'),
     adapters: new Map(Object.entries(adapters)),
-    settingsPath: join(dir, 'settings.json'),
   })
   return { persona, runner }
 }

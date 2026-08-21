@@ -109,16 +109,19 @@ const sessionOwner = new Map<string, string>()
 
 const hook = new HookServer(
   queue,
-  (sessionId) => {
-    const bot = sessionOwner.get(sessionId) ?? personas[0].id
-    const p = personas.find((x) => x.id === bot) ?? personas[0]
+  // The bot comes from the hook URL, which each turn's own settings file
+  // carries. The session id is only a fallback for a turn started before this
+  // existed, and it resolves to nothing rather than to somebody else's policy.
+  (sessionId, fromUrl) => {
+    const id = fromUrl ?? sessionOwner.get(sessionId)
+    const p = personas.find((x) => x.id === id)
+    if (!p) throw new Error(`gate could not tell which bot is asking (session ${sessionId})`)
     return { bot: p.id, chat: chatFor.get(p.id) ?? null, policy: p.policy, paused }
   },
   randomBytes(16).toString('hex'),
 )
 
 const port = await hook.listen()
-const settingsPath = hook.writeSettings(join(home, 'run'))
 console.log(`gate listening on 127.0.0.1:${port}`)
 
 // The MCP server runs as a stdio child of the CLI. Spawned through tsx so it
@@ -132,8 +135,6 @@ const runner = new TurnRunner({
   hook,
   adapters: buildAdapters(),
   isPaused: () => paused,
-  settingsPath,
-  codexShim: hook.shimPath(join(home, 'run'), 'codex'),
   guardrails: { perWindow: Number(process.env.AGENTDA_TURNS_PER_WINDOW ?? 60) },
   mcpEntries: (p) => ({
     ...(p.agentdaTools && {

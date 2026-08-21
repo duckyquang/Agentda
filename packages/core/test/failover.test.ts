@@ -27,7 +27,6 @@ describe('failover policy', () => {
 
   it('returns nothing when the chain is exhausted', () => {
     expect(nextProvider(chain, 'anthropic-api', { allowMetered: true })).toBeUndefined()
-    expect(nextProvider(chain, 'not-in-chain')?.choice.provider).toBe('claude')
   })
 
   it('tells the user context was rebuilt, never resumed', () => {
@@ -36,4 +35,14 @@ describe('failover policy', () => {
     expect(note).toMatch(/rebuilt/)
     expect(note).not.toMatch(/resumed the/i)
   })
+
+  it('has no next provider for one that is not in the chain', () => {
+    // Not knowing where you are in the chain is not the same as being at the
+    // start of it. Slicing from findIndex -1 + 1 starts at zero, which hands
+    // the work to the FIRST provider — possibly the one that just failed, and
+    // for a provider that was never in the chain at all (a replayed routine,
+    // say) it means handing that work to a model as prose.
+    expect(nextProvider(chain, 'not-in-chain')).toBeUndefined()
+  })
 })
+

@@ -179,6 +179,41 @@ Phase 2 started 2026-08-13 without waiting on either: nothing in it depends on T
 
 **Riskiest assumption.** Third-party MCP server quality. The packs stand on maintained community servers we don't control; each one is vetted by running it, and the outbound-verb proxy on Codex is the safety net when a server's tool surface is broader than its README admits.
 
+## What an adversarial sweep found, 2026-08-21
+
+Phases 1–3 were built and their exit criteria ticked against real runs. A deliberate hunt
+for defects in the safety-critical paths afterwards found several, every one of them
+reproduced before it was touched. They are listed here because where they were is the
+useful part.
+
+- **No Telegram approval could ever have been tapped.** A chat bridge delivers updates one
+  at a time; the message handler awaited the turn, the turn blocked on the gate, and the
+  Approve press sat in the next update, undeliverable. Every gated action would have timed
+  out to deny.
+- **The gate judged one bot's action by another bot's policy.** The bot was resolved from a
+  session id, which does not exist until a turn ends — so on a session's first tool call it
+  fell back to the first bot loaded.
+- **The Codex shim overwrote the Claude settings file**, so an approval reached Claude as
+  silence while the audit row already said allow.
+- **Anything on the machine could read the control token** off the desktop page, and the
+  bot's own browser subprocess was handed that same token.
+- **A symlink inside an allowed directory walked straight out of a bot's scope.**
+- Smaller: the handoff cap was a lifetime cap keyed on the message text; a bot given its own
+  token after boot could never be paired; a routine with no chat of its own posted into
+  another bot's thread and was recorded as a successful run; approval cards rendered
+  attacker-influenced payloads as markup and truncated them without saying so.
+
+Every one of them lived on a path that had never been run end to end — the Telegram bridge
+(no token), the daemon's own gate wiring (the live gate tests drive the runner harness, not
+the daemon), the desktop page (no browser had ever loaded it). The tests that existed were
+good tests of the code they covered. The lesson is the coverage boundary, not the tests, so
+this round added: the daemon booted as a real process, the desktop page loaded in a real
+browser, the bridge driven through its real polling loop, and the MCP server driven over
+real MCP.
+
+ADR 0002's claim that the on-screen browser surface helps against bot detection was also
+measured and is mostly wrong; the ADR now carries the numbers.
+
 ## Phase 4: Full desktop hands and watch-and-learn
 
 **Goal.** Beyond the browser: bots that can drive a whole desktop when a task needs an app outside the browser — without taking the user's desktop away — and bots that learn routines by watching the user do a task once. (The browser tool itself shipped in Phase 1; this phase is about everything a browser can't reach.)

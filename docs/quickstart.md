@@ -136,8 +136,10 @@ pnpm --filter @agentda/mcp-browser exec playwright install chromium
 
 By default the browser runs in the **shadow** surface: a real Chromium with no window, so
 the bot browses while you keep working — it never takes your screen or your keyboard. Set
-`browser_surface = "on-screen"` to watch it work in a visible window instead (useful when a
-site refuses headless traffic).
+`browser_surface = "on-screen"` to watch it work in a visible window instead. It is worth a
+try against a site that turns away headless browsers, but it is not a way around bot
+detection: `navigator.webdriver` is true on both surfaces, and measurement says the
+user-agent is the only thing that differs ([ADR 0002](adr/0002-browser-surfaces.md)).
 
 Navigation and reading are auto-approved; clicking and typing are gated, because a click
 can submit or buy something.

@@ -631,14 +631,19 @@ async function dispatchHandoffs(persona: Persona, chat: string, text: string, ta
       break
     }
     await say(persona, chat, `↪︎ handing this to ${t.persona.id}`)
-    // The receiving bot answers through its own bridge, so a handoff in a
-    // group chat reads as two bots talking rather than one narrating both.
-    const answer = await runTurn(t.persona, chat, `${persona.id} handed this to you: ${t.note}`, task)
+    // The receiving bot answers through its own bridge, so a handoff in a group
+    // chat reads as two bots talking rather than one narrating both. Queued on
+    // that bot rather than run directly: it may already be mid-turn from a
+    // message of its own, and two turns for one bot share its browser profile.
+    // Safe to await — a different bot's queue, so this cannot wait on itself.
+    const answer = await enqueueTurn(t.persona, chat, `${persona.id} handed this to you: ${t.note}`, task)
     if (answer) results.push(`${t.persona.id}: ${answer}`)
   }
 
   // Only a coordinator gets the last word. Giving every bot one would make any
-  // two of them a loop with extra steps.
+  // two of them a loop with extra steps. Called directly, NOT queued: this runs
+  // inside the coordinator's own turn, so queueing it behind itself would wait
+  // forever.
   if (!persona.coordinator || results.length < 2) return
   await runTurn(
     persona,

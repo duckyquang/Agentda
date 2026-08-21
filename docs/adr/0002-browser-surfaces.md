@@ -44,8 +44,22 @@ settle delay after launch before acting, and never calls `bringToFront`.
   class. The cost is maintaining ~200 lines against Playwright's API.
 - Playwright's browser download (~150MB) is a real install cost, so the browser server is
   opt-in per bot (`browser = true` in `bot.toml`), not on by default.
-- Anti-bot detection will block shadow mode on some sites: new headless still advertises
-  `HeadlessChrome`, runs software WebGL, and lacks proprietary codecs. The on-screen
-  override exists for exactly that. We claim no specific site works until we run it.
+- Anti-bot detection will block both surfaces on some sites, and switching surface buys
+  less than this ADR originally claimed. Measured on 2026-08-21 with the launch options
+  this server actually uses (macOS, Chromium 151, Playwright 1.62.1):
+
+  | | shadow | on-screen |
+  |---|---|---|
+  | `navigator.webdriver` | `true` | `true` |
+  | `HeadlessChrome` in the UA | yes | no |
+  | WebGL renderer | real Metal renderer | real Metal renderer |
+  | H.264 (`canPlayType`) | `probably` | `probably` |
+
+  So the user-agent is the only difference, and the signal most detectors check first —
+  `navigator.webdriver` — is set either way. Two of the three reasons this ADR gave for
+  the on-screen override (software WebGL, missing codecs) were simply wrong. On-screen is
+  still worth trying against a site that keys on the UA, but it is not an escape hatch
+  from bot detection, and Phase 4's handback docs must not present it as one. We claim no
+  specific site works until we run it.
 - Full OS-level desktop control stays out of scope (Phase 4), where the answer is an
   isolated virtual desktop rather than the user's own.

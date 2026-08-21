@@ -189,6 +189,18 @@ server.tool(
   },
 )
 
+server.tool(
+  'browser_select',
+  'Choose an option in a dropdown. Gated: a dropdown chooses which account, which address, which plan.',
+  { selector: z.string(), option: z.string().describe('the option label or value to choose') },
+  async ({ selector, option }) => {
+    assertNotHandedOver()
+    const p = await getPage()
+    await p.locator(selector).selectOption(option, { timeout: 15_000 })
+    return { content: [{ type: 'text', text: `chose ${option} in ${selector}` }] }
+  },
+)
+
 server.tool('browser_screenshot', 'Screenshot the current page.', {}, async () => {
   const p = await getPage()
   const buf = await p.screenshot({ type: 'png', fullPage: false })

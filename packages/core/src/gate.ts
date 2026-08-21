@@ -58,8 +58,11 @@ const anyMatch = (patterns: string[], name: string) => patterns.some((p) => matc
 // tools we already decided to attach — no side effects, nothing to approve.
 const DISCOVERY_TOOLS = ['ToolSearch']
 
-// paused forces Ask regardless of the bot's stored mode (the global /pause switch).
-export function decide(tool: string, policy: BotPolicy, paused = false): GateOutcome {
+// forceAsk drops this one call back to Ask whatever the bot's stored mode says.
+// Two things use it: the global /pause switch, and a replayed step the human
+// marked sensitive when they reviewed the recording — same meaning, so it needs
+// no second mechanism and the audit row honestly reads mode = ask.
+export function decide(tool: string, policy: BotPolicy, forceAsk = false): GateOutcome {
   if (DISCOVERY_TOOLS.includes(tool)) {
     return { kind: 'allow', source: 'auto-class', reason: 'tool discovery, no side effects' }
   }
@@ -69,7 +72,7 @@ export function decide(tool: string, policy: BotPolicy, paused = false): GateOut
   if (anyMatch(policy.autoApprove, tool)) {
     return { kind: 'allow', source: 'auto-class', reason: 'read-only tool, auto-approved' }
   }
-  const effectiveMode: Mode = paused ? 'ask' : policy.mode
+  const effectiveMode: Mode = forceAsk ? 'ask' : policy.mode
   const mustAlwaysAsk = anyMatch(policy.alwaysAsk, tool)
   if (effectiveMode === 'auto' && !mustAlwaysAsk) {
     return { kind: 'allow', source: 'auto-mode', reason: 'auto mode, not on always-ask list' }

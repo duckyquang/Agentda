@@ -56,8 +56,17 @@ export class TurnRunner {
     persona: Persona,
     chat: string,
     input: string,
-    opts: { scheduled?: boolean; onEvent?: (e: AgentEvent) => void } = {},
+    opts: {
+      scheduled?: boolean
+      onEvent?: (e: AgentEvent) => void
+      // Run on one named provider instead of the bot's chain. Used by replay:
+      // a recorded routine runs on the replay adapter, and failing over to a
+      // model would hand it the routine's prompt as prose.
+      provider?: string
+      adapterOptions?: Record<string, unknown>
+    } = {},
   ): Promise<TurnResult> {
+    if (opts.provider) return this.runOn(opts.provider, persona, chat, input, opts)
     let provider = persona.provider
     const notices: string[] = []
     for (;;) {
@@ -84,7 +93,7 @@ export class TurnRunner {
     persona: Persona,
     chat: string,
     input: string,
-    opts: { scheduled?: boolean; onEvent?: (e: AgentEvent) => void } = {},
+    opts: { scheduled?: boolean; onEvent?: (e: AgentEvent) => void; adapterOptions?: Record<string, unknown> } = {},
   ): Promise<TurnResult> {
     const guard = { ...this.deps.guardrails, ...personalGuardrails(persona) }
     // Interactive turns bypass quiet hours: the human is right there asking.
@@ -133,14 +142,17 @@ export class TurnRunner {
         model: persona.model,
         // API providers run our own loop, so the gate is a plain call — no
         // hook, no shim, no race.
-        gate: async (tool: string, toolInput: unknown) => {
+        // forceAsk lets a caller drop one call back to Ask — a replayed step the
+        // human marked sensitive uses the same switch the global pause does.
+        gate: async (tool: string, toolInput: unknown, gateOpts?: { forceAsk?: boolean }) => {
           const r = await this.deps.queue.request(
             { bot: persona.id, chat, tool, input: toolInput },
             persona.policy,
-            this.deps.isPaused?.() ?? false,
+            (this.deps.isPaused?.() ?? false) || !!gateOpts?.forceAsk,
           )
           return { decision: r.decision, reason: r.reason }
         },
+        ...opts.adapterOptions,
       })) {
         opts.onEvent?.(ev)
         if (ev.type === 'text') text.push(ev.text)
@@ -221,7 +233,7 @@ function toolBriefing(p: Persona, mcpConfig: string | undefined): string {
   }
   if (p.browser) {
     lines.push(
-      `- \`mcp__browser__browser_navigate\` / \`browser_read\` / \`browser_click\` / \`browser_type\` / \`browser_screenshot\`: a real browser, running ${
+      `- \`mcp__browser__browser_navigate\` / \`browser_read\` / \`browser_click\` / \`browser_type\` / \`browser_select\` / \`browser_screenshot\`: a real browser, running ${
         p.browserSurface === 'shadow' ? 'invisibly in the background' : 'in a visible window'
       }. Read the page before clicking; selectors you did not read are guesses.`,
     )

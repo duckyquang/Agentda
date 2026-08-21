@@ -57,11 +57,11 @@ export class ApprovalQueue {
   async request(
     args: { bot: string; chat?: string | null; tool: string; input: unknown },
     policy: BotPolicy,
-    paused = false,
+    forceAsk = false,
   ): Promise<Resolution> {
     const chat = args.chat ?? null
-    const outcome = decide(args.tool, policy, paused)
-    const mode: Mode = paused ? 'ask' : policy.mode
+    const outcome = decide(args.tool, policy, forceAsk)
+    const mode: Mode = forceAsk ? 'ask' : policy.mode
 
     if (outcome.kind === 'allow') {
       const res: Resolution = { decision: 'allow', source: outcome.source, reason: outcome.reason }

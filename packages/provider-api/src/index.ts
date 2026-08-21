@@ -22,7 +22,11 @@ export interface ApiTurnOptions {
   // 'deny' means the tool never executes; the model is told it was refused, and
   // why — an approval answered with "but cc anna" is a denial whose reason IS
   // the instruction, and dropping it loses the amendment (FR-21).
-  gate?: (tool: string, input: unknown) => Promise<{ decision: 'allow' | 'deny'; reason?: string }>
+  gate?: (
+    tool: string,
+    input: unknown,
+    opts?: { forceAsk?: boolean },
+  ) => Promise<{ decision: 'allow' | 'deny'; reason?: string }>
   maxSteps?: number
 }
 

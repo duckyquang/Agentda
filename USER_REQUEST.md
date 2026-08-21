@@ -4,7 +4,7 @@ This file is my standing request list. I rewrite it whenever I need something on
 provide — credentials, an account, a decision, a device. If it says "nothing right now,"
 you're not blocking anything.
 
-**Last updated:** 2026-08-18 · **Status:** 7 items, none urgent, none blocking
+**Last updated:** 2026-08-21 · **Status:** 8 items, none urgent, none blocking
 
 | # | What | Why it's blocked on you | Time |
 |---|---|---|---|
@@ -15,6 +15,7 @@ you're not blocking anything.
 | 5 | `brew install ffmpeg whisper-cpp` + a model file | Installs software on your machine — your call, not mine | ~5 min |
 | 6 | Google OAuth credentials, for the mail/calendar packs | Needs your Google account and consent screen | ~10 min |
 | 7 | One API key, if you want | Verifies the hosted providers, and one honest evaluation I couldn't run | ~2 min |
+| 8 | `gh auth refresh -s workflow` | Your GitHub token can't touch CI files, and two CI jobs are waiting | ~1 min |
 
 Phases 1, 2 and 3 are built. What's left in each is exactly the parts that need one of the
 above, and every one of those is marked ⏳ in [PLAN.md](PLAN.md) rather than quietly ticked.
@@ -308,6 +309,28 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Skip this happily if you'd rather not spend anything: subscription and local providers cover
 the product's actual pitch, and the API adapters exist mainly as the policy hedge.
+
+---
+
+## 8. One GitHub scope, so CI can grow two jobs
+
+**What this unlocks:** the two CI jobs that would have caught most of what a sweep found by
+hand on 2026-08-21 — `cargo check` on the Tauri shell, which nothing else looks at, and a
+browser job running every live suite that needs no credentials (the desktop page in a real
+browser, the screencast preview, every shipped tool pack launched and checked).
+
+Your `gh` token has `gist, read:org, repo`. GitHub refuses any push containing a change to
+`.github/workflows/`, so the commit carrying those jobs could not go up — I replayed the
+branch without it so the rest could land. Nothing is lost: the change is on the local
+`backup-with-ci` branch and as a patch in my scratchpad.
+
+```bash
+gh auth refresh -s workflow
+```
+
+Then tell me and I'll re-apply the two jobs in one commit. Or if you would rather not widen
+the token, say so and I will leave CI as it is — everything those jobs run is already
+runnable locally with `AGENTDA_LIVE=1 pnpm test:live`.
 
 ---
 

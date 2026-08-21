@@ -301,3 +301,50 @@ describe('amendments and preview frames', () => {
   })
 })
 
+describe('what a credential is allowed to do', () => {
+  it('does not hand the control token to anyone who asks for the page', async () => {
+    const s = await serve()
+    // The page is markup and nothing else. It used to be served with the token
+    // substituted into it, and without auth — so anything on the machine could
+    // read the secret that answers approvals.
+    const anonymous = await fetch(s.url('/'))
+    expect(anonymous.status).toBe(401)
+
+    const page = await (await fetch(s.url('/'), { headers: s.auth })).text()
+    expect(page).not.toContain(s.api.token)
+    await s.api.close()
+  })
+
+  it('gives a bot’s browser its own credential, not the one that answers approvals', async () => {
+    const s = await serve()
+    const preview = new URL(s.api.previewUrl('chief')).searchParams.get('token')!
+    // The URL goes into the environment of a subprocess running the bot's own
+    // turn, so it must not be the key to the approval queue.
+    expect(preview).not.toBe(s.api.token)
+
+    const frame = (token: string, bot = 'chief') =>
+      fetch(`${s.url(`/api/preview/${bot}`)}?token=${token}`, { method: 'POST', body: '/9j/4AAQ' })
+    expect((await frame(preview)).status).toBe(200)
+    // Its own bot only.
+    expect((await frame(preview, 'scout')).status).toBe(401)
+    await s.api.close()
+  })
+
+  it('a browser credential cannot approve, read the audit log, or take itself over', async () => {
+    const s = await serve()
+    const preview = new URL(s.api.previewUrl('chief')).searchParams.get('token')!
+    const headers = { authorization: `Bearer ${preview}`, 'content-type': 'application/json' }
+
+    // Not a valid credential for these routes at all, so they never see it.
+    expect((await fetch(s.url('/api/approve'), { method: 'POST', headers, body: '{"id":"x","decision":"allow"}' })).status).toBe(401)
+    expect((await fetch(s.url('/api/state'), { headers })).status).toBe(401)
+    expect((await fetch(s.url('/api/audit'), { headers })).status).toBe(401)
+    // Handing the page to a human is the human's call, not the browser's.
+    const takeover = await fetch(s.url('/api/preview/chief/control'), { method: 'POST', headers, body: '{"control":"take-over"}' })
+    expect(takeover.status).toBe(403)
+    // Reading whether it has been taken over is exactly what it is for.
+    expect((await fetch(s.url('/api/preview/chief/control'), { headers })).status).toBe(200)
+    await s.api.close()
+  })
+})
+

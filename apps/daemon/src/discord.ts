@@ -51,7 +51,10 @@ export function createDiscordBridge(deps: DiscordDeps) {
     },
     askApproval: (chat, req, body) =>
       post(chat, {
-        content: `**${req.bot}** wants to run \`${req.tool}\`\n_${req.reason}_\n\`\`\`json\n${body.slice(0, 1500)}\n\`\`\``,
+        // The tool name and reason are ours; the payload is content the bot
+        // read somewhere, so it goes in unformatted — a backtick inside a code
+        // fence closes it, and the rest would render as whatever it likes.
+        content: `**${req.bot}** wants to run \`${req.tool}\`\n_${req.reason}_\n\n${body.slice(0, 1500)}`,
         components: [
           new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder().setCustomId(`ok:${req.id}`).setLabel('Approve').setStyle(ButtonStyle.Success),

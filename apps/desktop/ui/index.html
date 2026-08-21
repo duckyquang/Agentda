@@ -109,7 +109,10 @@
   </form>
 </main>
 <script>
-const TOKEN = new URLSearchParams(location.search).get('token') || '__AGENTDA_TOKEN__'
+// The token comes from the URL the daemon printed, and only from there. It is
+// deliberately not baked into this file: the page is served to anything on the
+// machine that asks for it.
+const TOKEN = new URLSearchParams(location.search).get('token') || ''
 const api = (path, opts = {}) =>
   fetch(path, { ...opts, headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}`, ...(opts.headers || {}) } })
     .then((r) => r.json())

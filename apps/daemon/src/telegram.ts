@@ -28,10 +28,14 @@ export function createBridge(deps: TelegramDeps) {
     },
     askApproval: async (chat, req, body) => {
       const kb = new InlineKeyboard().text('Approve', `ok:${req.id}`).text('Deny', `no:${req.id}`)
+      // No parse_mode. The payload is content the bot read from somewhere, and
+      // a backtick in it closes the code fence early — after which the rest
+      // renders as formatting and can describe the action as something other
+      // than what will run. The human sees the exact bytes instead.
       const msg = await bot.api.sendMessage(
         chat,
-        `${req.bot} wants to run *${req.tool}*\n\n\`\`\`\n${body}\n\`\`\`\n_${req.reason}_`,
-        { parse_mode: 'Markdown', reply_markup: kb },
+        `${req.bot} wants to run ${req.tool}\n\n${body}\n\n${req.reason}`,
+        { reply_markup: kb },
       )
       return { chat: String(msg.chat.id), messageId: String(msg.message_id) }
     },

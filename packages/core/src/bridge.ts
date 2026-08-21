@@ -34,8 +34,15 @@ export interface BridgeHost {
 
 // The payload in full, because the human has to see the concrete action at the
 // moment of decision — not a summary of it.
+//
+// When it does not fit, say so. A payload silently cut at the platform's limit
+// means the human approved a prefix, and which prefix they saw is chosen by
+// whoever wrote the content.
 export function cardBody(req: ApprovalRequest, limit = 3000): string {
-  return JSON.stringify(req.input ?? {}, null, 2).slice(0, limit)
+  const full = JSON.stringify(req.input ?? {}, null, 2)
+  if (full.length <= limit) return full
+  const cut = full.slice(0, limit - 80)
+  return `${cut}\n\n… cut short here: ${full.length - cut.length} more characters. Open the desktop app to read the whole thing before approving.`
 }
 
 // The rules that must be identical on every platform (FR-18): who may talk,

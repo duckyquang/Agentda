@@ -48,6 +48,11 @@ const UI_DIR = fileURLToPath(new URL('../../desktop/ui', import.meta.url))
 
 export class ControlApi {
   readonly token = randomBytes(24).toString('hex')
+  // A separate, narrower secret per bot, handed to that bot's browser server so
+  // it can post frames. It is NOT the control token: the browser server is a
+  // subprocess of the provider CLI running the bot's own turn, so a bot that
+  // got hold of the control token could answer its own approvals.
+  private previewTokens = new Map<string, string>()
   private server: Server
   private port = 0
   private listeners = new Set<(event: string, data: unknown) => void>()
@@ -86,18 +91,6 @@ export class ControlApi {
         return void json(403, { error: 'loopback only' })
       }
 
-      // The UI itself is unauthenticated (it is just markup); every data route
-      // is not. The token rides in the URL for the initial page load so the
-      // app can hand it to the page without a login screen.
-      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        try {
-          const html = readFileSync(join(UI_DIR, 'index.html'), 'utf8').replace('__AGENTDA_TOKEN__', this.token)
-          return void res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html)
-        } catch {
-          return void res.writeHead(404).end('desktop UI not found')
-        }
-      }
-
       // The browser asks for this on its own and has no token to offer; a 401
       // here is a red console error on every page load for nothing.
       if (req.method === 'GET' && url.pathname === '/favicon.ico') return void res.writeHead(204).end()
@@ -105,7 +98,28 @@ export class ControlApi {
       // EventSource cannot set headers, so the stream authenticates by query
       // param. Same secret either way.
       const presented = req.headers.authorization?.replace(/^Bearer /, '') ?? url.searchParams.get('token')
-      if (presented !== this.token) return void json(401, { error: 'unauthorized' })
+
+      // Bot-scoped preview credentials, checked before the control token so a
+      // browser server never needs one. They reach these two routes for their
+      // own bot and nothing else.
+      const previewRoute = /^\/api\/preview\/([\w-]+)(\/control)?$/.exec(url.pathname)
+      const previewBot = previewRoute?.[1]
+      const scoped = !!previewBot && presented === this.previewTokens.get(previewBot)
+
+      if (!scoped && presented !== this.token) return void json(401, { error: 'unauthorized' })
+
+      // The page itself is markup and carries no secret — the token comes from
+      // the URL the daemon printed. Serving it without a token used to hand the
+      // control secret to anything on the machine that asked for the page.
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+        try {
+          return void res
+            .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+            .end(readFileSync(join(UI_DIR, 'index.html'), 'utf8'))
+        } catch {
+          return void res.writeHead(404).end('desktop UI not found')
+        }
+      }
 
       const botRoute = /^\/api\/bots\/([\w-]+)(\/token)?$/.exec(url.pathname)
 
@@ -188,7 +202,6 @@ export class ControlApi {
       // server the CLI spawned, not in the daemon, so frames come to us rather
       // than us reaching into it. JPEG bytes straight through: re-encoding a
       // screencast frame to JSON would cost more than the frame is worth.
-      const previewRoute = /^\/api\/preview\/([\w-]+)(\/control)?$/.exec(url.pathname)
       if (previewRoute && req.method === 'POST' && !previewRoute[2]) {
         // CDP hands us base64 JPEG already, so it travels as-is: decoding it
         // here only to re-encode it for the browser would be work for nobody.
@@ -209,6 +222,9 @@ export class ControlApi {
         return void json(200, { control: this.browserControl.get(previewRoute[1]) ?? null })
       }
       if (previewRoute && previewRoute[2] && req.method === 'POST') {
+        // Take over and hand back are the human's call, so the browser's own
+        // credential does not get to make it.
+        if (scoped) return void json(403, { error: 'only the desktop app may take a browser over' })
         const body = await readBody(req)
         const control: BrowserControl = body.control === 'take-over' ? 'take-over' : body.control === 'hand-back' ? 'hand-back' : null
         this.browserControl.set(previewRoute[1], control)
@@ -349,9 +365,16 @@ export class ControlApi {
     return `http://127.0.0.1:${this.port}/?token=${this.token}`
   }
 
-  // Handed to each bot's browser server so it knows where to send frames.
+  // Handed to each bot's browser server so it knows where to send frames. Its
+  // own credential, not the control token — this URL is passed in the
+  // environment of a subprocess running the bot's own turn.
   previewUrl(botId: string): string {
-    return `http://127.0.0.1:${this.port}/api/preview/${botId}?token=${this.token}`
+    let token = this.previewTokens.get(botId)
+    if (!token) {
+      token = randomBytes(24).toString('hex')
+      this.previewTokens.set(botId, token)
+    }
+    return `http://127.0.0.1:${this.port}/api/preview/${encodeURIComponent(botId)}?token=${token}`
   }
 
   close(): Promise<void> {

@@ -35,7 +35,10 @@ export function createSlackBridge(deps: SlackDeps) {
         text: `${req.bot} wants to run ${req.tool}`,
         blocks: [
           { type: 'section', text: { type: 'mrkdwn', text: `*${req.bot}* wants to run \`${req.tool}\`\n_${req.reason}_` } },
-          { type: 'section', text: { type: 'mrkdwn', text: '```\n' + body.slice(0, 2800) + '\n```' } },
+          // plain_text, not mrkdwn: the payload is content the bot read
+          // somewhere, and mrkdwn would let it format itself into looking like
+          // a different action than the one that will run.
+          { type: 'section', text: { type: 'plain_text', text: body.slice(0, 2800) } },
           {
             type: 'actions',
             elements: [

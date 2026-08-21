@@ -545,7 +545,7 @@ async function handleCommand(cmd: string, args: string, chat: string, reply: (s:
   }
   if (cmd === 'audit') {
     const rows = db
-      .prepare('SELECT ts, bot, tool, decision, source, mode FROM audit_log ORDER BY id DESC LIMIT 15')
+      .prepare('SELECT ts, bot, tool, decision, source, mode, decided_by FROM audit_log ORDER BY id DESC LIMIT 15')
       .all() as any[]
     return reply(
       rows.length
@@ -602,12 +602,33 @@ async function handleCommand(cmd: string, args: string, chat: string, reply: (s:
       return reply(`Could not stop recording: ${(err as Error).message}`)
     }
   }
+  if (cmd === 'members') {
+    const rows = speakers.platforms().flatMap((platform) =>
+      owners.list(platform).map((m) => `${platform}:${m.user_id}${m.label ? ` (${m.label})` : ''} — ${m.role}`),
+    )
+    return reply(rows.length ? rows.join('\n') : 'nobody is paired yet')
+  }
+  if (cmd === 'invite') {
+    // Roles travel with the code, so the invite decides what someone gets
+    // before they ever use it.
+    const role = args.trim() === 'approver' ? 'approver' : args.trim() === 'owner' ? 'owner' : 'member'
+    const platform = speakers.platforms()[0]
+    if (!platform) return reply('no chat bridge is running, so there is nothing to invite anyone to')
+    return reply(
+      `Invite code for a ${role}: ${owners.mintCode(platform, role)}\n` +
+        (role === 'member'
+          ? 'They will be able to talk to the bots. Their taps will not count as approvals.'
+          : 'They will be able to answer approval cards, and every decision will be recorded under their name.'),
+    )
+  }
   if (cmd === 'reload') {
     personas = readPersonas()
     syncBridges()
     return reply(`reloaded ${personas.length} bot(s)`)
   }
-  return reply('commands: /bots /mode <bot> ask|auto /pause /resume /audit /routines /record <bot> <url> /stop-recording <bot> <name> /reload')
+  return reply(
+    'commands: /bots /mode <bot> ask|auto /pause /resume /audit /members /invite [member|approver|owner] /routines /record <bot> <url> /stop-recording <bot> <name> /reload',
+  )
 }
 
 const scheduler = new Scheduler(

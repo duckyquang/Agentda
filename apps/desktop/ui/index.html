@@ -287,9 +287,10 @@ async function renderAudit() {
       <input type="text" id="f-tool" placeholder="tool contains…" value="${esc(auditFilter.tool)}" />
       <span class="hint">${shown.length} of ${rows.length}</span>
     </div>` + (shown.length
-      ? `<table><tr><th>when</th><th>bot</th><th>tool</th><th>decision</th><th>why</th><th>mode</th></tr>` +
+      ? `<table><tr><th>when</th><th>bot</th><th>tool</th><th>decision</th><th>who</th><th>why</th><th>mode</th></tr>` +
         shown.map((r) => `<tr><td>${esc(r.ts)}</td><td>${esc(r.bot)}</td><td>${esc(r.tool)}</td>
           <td class="${r.decision}">${esc(r.decision)}</td>
+          <td>${esc(r.decided_by || '—')}</td>
           <td>${esc(r.source)}${r.reason ? ` — ${esc(String(r.reason).slice(0, 120))}` : ''}</td>
           <td>${esc(r.mode)}</td></tr>`).join('') + `</table>`
       : '<div class="empty">Nothing matches.</div>')

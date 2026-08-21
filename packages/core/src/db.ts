@@ -31,7 +31,11 @@ export function openDb(path: string): Database.Database {
       decision TEXT NOT NULL,          -- allow | deny
       source TEXT NOT NULL,            -- auto-class | auto-mode | human-tap | human-text | timeout | standing-rule
       mode TEXT NOT NULL,              -- ask | auto (bot mode at decision time)
-      reason TEXT
+      reason TEXT,
+      -- WHICH human, once there is more than one (PLAN Phase 5). Null for the
+      -- decisions no human made. Added to this table rather than to a second
+      -- one: "who decided" is part of a decision, not a join away from it.
+      decided_by TEXT
     );
 
     -- Our own turn counts, for the soft budgets. Local estimates only: no vendor
@@ -79,6 +83,12 @@ export function openDb(path: string): Database.Database {
       expires_at TEXT NOT NULL
     );
   `)
+  // Existing databases predate decided_by. Adding it here rather than in a
+  // migration runner because it is one column and the alternative is a
+  // framework.
+  const auditColumns = (db.prepare('PRAGMA table_info(audit_log)').all() as { name: string }[]).map((c) => c.name)
+  if (!auditColumns.includes('decided_by')) db.exec('ALTER TABLE audit_log ADD COLUMN decided_by TEXT')
+
   return db
 }
 

@@ -45,7 +45,7 @@ export {
   validateRoutine,
   verbTool,
 } from './routine'
-export { Owners } from './owners'
+export { Owners, type Role } from './owners'
 export { resolveInScope, safeMemoryName } from './scope'
 export {
   loadPack,

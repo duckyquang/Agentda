@@ -114,4 +114,25 @@ describe('the gate blocks, logs, and cannot be bypassed', () => {
     expect(q.settle(asked!.id, { decision: 'allow', source: 'human-tap' })).toBe(false) // too late
     await expect(pending).resolves.toMatchObject({ decision: 'deny' })
   })
+
+  it('records which human decided, so an audit log means something with a team', async () => {
+    const db = openDb(join(dir, `by${n++}.db`))
+    const q = new ApprovalQueue(db, { timeoutMs: 2000 })
+    const pending = q.request({ bot: 'b', chat: 'c', tool: 'Write', input: {} }, { ...defaultPolicy(), grants: ['*'] })
+    await new Promise((r) => setImmediate(r))
+    q.settle(q.open()[0].id, { decision: 'allow', source: 'human-tap', by: 'telegram:222' })
+    await pending
+
+    const row = db.prepare('SELECT decision, source, decided_by FROM audit_log ORDER BY id DESC LIMIT 1').get() as any
+    expect(row).toMatchObject({ decision: 'allow', source: 'human-tap', decided_by: 'telegram:222' })
+  })
+
+  it('leaves it empty for the decisions no human made', async () => {
+    const db = openDb(join(dir, `by${n++}.db`))
+    const q = new ApprovalQueue(db, { timeoutMs: 2000 })
+    await q.request({ bot: 'b', chat: 'c', tool: 'Nope', input: {} }, { ...defaultPolicy(), grants: [] })
+    const row = db.prepare('SELECT decision, decided_by FROM audit_log ORDER BY id DESC LIMIT 1').get() as any
+    expect(row).toMatchObject({ decision: 'deny', decided_by: null })
+  })
 })
+

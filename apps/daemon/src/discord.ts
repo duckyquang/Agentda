@@ -81,7 +81,7 @@ export function createDiscordBridge(deps: DiscordDeps) {
       for (let i = 0; i < text.length; i += CHUNK) await transport.send(message.channelId, text.slice(i, i + CHUNK))
     }
     if (!(await bridge.authenticate(message.author.id, message.content, reply))) return
-    await bridge.inbound(message.content, message.channelId, message.channel.type === ChannelType.DM, reply)
+    await bridge.inbound(message.content, message.channelId, message.channel.type === ChannelType.DM, reply, message.author.id)
   })
 
   client.on(Events.InteractionCreate, async (interaction: Interaction) => {

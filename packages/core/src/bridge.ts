@@ -80,7 +80,13 @@ export class Bridge {
 
   // One route for every inbound message, whatever carried it: typed, pasted, or
   // transcribed from a voice note.
-  async inbound(text: string, chat: string, isPrivate: boolean, reply: (s: string) => Promise<void>): Promise<void> {
+  async inbound(
+    text: string,
+    chat: string,
+    isPrivate: boolean,
+    reply: (s: string) => Promise<void>,
+    from?: string,
+  ): Promise<void> {
     if (text.startsWith('/')) {
       const [cmd, ...rest] = text.slice(1).split(/\s+/)
       await this.host.onCommand(cmd.split('@')[0], rest.join(' '), chat, reply)
@@ -89,7 +95,10 @@ export class Bridge {
 
     // A card is open in this thread and you typed at it: answer the card rather
     // than starting a turn (FR-21). Only text the parser is sure about counts.
-    const answered = this.host.queue.answerByText(text, { chat })
+    // Typing "yes" is answering a card, so it needs the same permission a tap
+    // does — otherwise the button is guarded and the keyboard is not.
+    const mayApprove = !from || this.host.owners.canApprove(this.platform, from)
+    const answered = mayApprove ? this.host.queue.answerByText(text, { chat }, from ? `${this.platform}:${from}` : undefined) : undefined
     if (answered) {
       await reply(
         answered.amendment
@@ -121,15 +130,17 @@ export class Bridge {
   }
 
   // A button press. The security-critical check is the same everywhere: it is
-  // only an approval if the person pressing it is the owner.
+  // only an approval if the person pressing it is allowed to approve — which,
+  // once a team exists, is narrower than being paired at all.
   decide(userId: string | undefined, data: string): { ok: boolean; text: string } {
-    if (!userId || !this.host.owners.isOwner(this.platform, userId)) {
-      this.host.logDropped(String(userId ?? 'unknown'), `button press from non-owner on ${this.platform}`)
-      return { ok: false, text: 'Not your bot.' }
+    if (!userId || !this.host.owners.canApprove(this.platform, userId)) {
+      const paired = !!userId && this.host.owners.isOwner(this.platform, userId)
+      this.host.logDropped(String(userId ?? 'unknown'), `button press from ${paired ? 'someone who may not approve' : 'a stranger'} on ${this.platform}`)
+      return { ok: false, text: paired ? 'You can talk to these bots, but you cannot approve their actions.' : 'Not your bot.' }
     }
     const [action, id] = data.split(':')
     const decision = action === 'ok' ? 'allow' : 'deny'
-    const settled = this.host.queue.settle(id, { decision, source: 'human-tap' })
+    const settled = this.host.queue.settle(id, { decision, source: 'human-tap', by: `${this.platform}:${userId}` })
     this.cards.delete(id)
     return { ok: settled, text: settled ? (decision === 'allow' ? 'Approved' : 'Denied') : 'Already resolved' }
   }

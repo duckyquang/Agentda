@@ -78,7 +78,7 @@ export function createBridge(deps: TelegramDeps) {
       const audio = await fetchAudio(`https://api.telegram.org/file/bot${deps.token}/${file.file_path}`)
       const text = await transcribe(audio, deps.voice)
       await reply(`🎤 "${text}"`)
-      await bridge.inbound(text, String(ctx.chat.id), ctx.chat.type === 'private', reply)
+      await bridge.inbound(text, String(ctx.chat.id), ctx.chat.type === 'private', reply, String(ctx.from?.id ?? ''))
     } catch (err) {
       await reply(
         err instanceof VoiceUnavailable

@@ -33,10 +33,10 @@ function fakeTransport() {
   return { transport, sent, edits, cards, closed }
 }
 
-function harness(opts: { paired?: string; bound?: string } = {}) {
+function harness(opts: { paired?: string; bound?: string; role?: 'owner' | 'approver' | 'member' } = {}) {
   const db = openDb(join(mkdtempSync(join(tmpdir(), 'agentda-bridge-')), 'd.db'))
   const owners = new Owners(db)
-  if (opts.paired) owners.claim('testchat', owners.mintCode('testchat'), opts.paired)
+  if (opts.paired) owners.claim('testchat', owners.mintCode('testchat', opts.role ?? 'owner'), opts.paired)
   const queue = new ApprovalQueue(db, { timeoutMs: 5000 })
   const t = fakeTransport()
   const turns: { bot: string; text: string }[] = []
@@ -131,6 +131,43 @@ describe('bridge rules, shared by every platform', () => {
     await h.bridge.closeCard(req.id, 'deny (timeout)')
     expect(h.closed).toEqual([`card-${req.id}`])
     h.queue.denyAll()
+  })
+})
+
+describe('a team, where being paired is not the same as being allowed to approve', () => {
+  it('a member may talk but their tap does not count', async () => {
+    const h = harness({ paired: 'U1', role: 'member' })
+    const pending = h.queue.request({ bot: 'chief', chat: 'C1', tool: 'Write', input: {} }, { ...defaultPolicy(), grants: ['*'] })
+    await new Promise((r) => setImmediate(r))
+    const id = h.queue.open()[0].id
+
+    // They can use the bots.
+    expect(await h.bridge.authenticate('U1', 'hello', h.reply)).toBe(true)
+    // They cannot answer for them.
+    const verdict = h.bridge.decide('U1', `ok:${id}`)
+    expect(verdict.ok).toBe(false)
+    expect(verdict.text).toMatch(/cannot approve/)
+    expect(h.queue.pendingCount()).toBe(1)
+    h.queue.denyAll()
+    await pending
+  })
+
+  it('and typing yes is not a way around the button', async () => {
+    const h = harness({ paired: 'U1', role: 'member' })
+    void h.queue.request({ bot: 'chief', chat: 'C1', tool: 'Write', input: {} }, { ...defaultPolicy(), grants: ['*'] })
+    await new Promise((r) => setImmediate(r))
+
+    await h.bridge.inbound('yes', 'C1', true, h.reply, 'U1')
+    expect(h.queue.pendingCount()).toBe(1)
+    h.queue.denyAll()
+  })
+
+  it('an approver’s decision is recorded under their name', async () => {
+    const h = harness({ paired: 'U2', role: 'approver' })
+    const pending = h.queue.request({ bot: 'chief', chat: 'C1', tool: 'Write', input: {} }, { ...defaultPolicy(), grants: ['*'] })
+    await new Promise((r) => setImmediate(r))
+    expect(h.bridge.decide('U2', `ok:${h.queue.open()[0].id}`).ok).toBe(true)
+    await expect(pending).resolves.toMatchObject({ decision: 'allow', by: 'testchat:U2' })
   })
 })
 

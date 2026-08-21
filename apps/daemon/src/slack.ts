@@ -68,7 +68,7 @@ export function createSlackBridge(deps: SlackDeps) {
     if (m.subtype || !m.user || !m.text) return
     const reply = replyTo(m.channel)
     if (!(await bridge.authenticate(m.user, m.text, reply))) return
-    await bridge.inbound(m.text, m.channel, m.channel_type === 'im', reply)
+    await bridge.inbound(m.text, m.channel, m.channel_type === 'im', reply, m.user)
   })
 
   for (const action of ['agentda_approve', 'agentda_deny']) {

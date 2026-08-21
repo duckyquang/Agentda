@@ -17,6 +17,9 @@ export interface Resolution {
   decision: 'allow' | 'deny'
   source: DecisionSource
   reason?: string
+  // Which human, once there is more than one — "platform:user_id". Absent for
+  // the decisions no human made.
+  by?: string
 }
 
 // The gate's runtime half: turns a decision into a resolved outcome, blocking on
@@ -47,10 +50,10 @@ export class ApprovalQueue {
   private log(req: Pick<ApprovalRequest, 'bot' | 'chat' | 'tool' | 'input'>, mode: Mode, r: Resolution): void {
     this.db
       .prepare(
-        `INSERT INTO audit_log (bot, chat, tool, input_json, decision, source, mode, reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit_log (bot, chat, tool, input_json, decision, source, mode, reason, decided_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(req.bot, req.chat, req.tool, JSON.stringify(req.input ?? null), r.decision, r.source, mode, r.reason ?? null)
+      .run(req.bot, req.chat, req.tool, JSON.stringify(req.input ?? null), r.decision, r.source, mode, r.reason ?? null, r.by ?? null)
   }
 
   // The one entry point. Returns only after the decision is final AND logged.
@@ -114,6 +117,7 @@ export class ApprovalQueue {
   answerByText(
     text: string,
     filter: { bot?: string; chat?: string | null } = {},
+    by?: string,
   ): { id: string; tool: string; decision: 'allow' | 'deny'; amendment?: string } | undefined {
     const target = this.open(filter)[0]
     if (!target) return undefined
@@ -121,10 +125,10 @@ export class ApprovalQueue {
     if (!answer) return undefined
     const r: Resolution =
       answer.kind === 'allow'
-        ? { decision: 'allow', source: 'human-text', reason: 'approved in chat' }
+        ? { decision: 'allow', source: 'human-text', reason: 'approved in chat', by }
         : answer.kind === 'deny'
-          ? { decision: 'deny', source: 'human-text', reason: 'denied in chat' }
-          : { decision: 'deny', source: 'human-text', reason: amendmentReason(answer.instruction) }
+          ? { decision: 'deny', source: 'human-text', reason: 'denied in chat', by }
+          : { decision: 'deny', source: 'human-text', reason: amendmentReason(answer.instruction), by }
     if (!this.settle(target.id, r)) return undefined
     return {
       id: target.id,

@@ -57,5 +57,44 @@ describe('owner pairing', () => {
     o.claim('telegram', code, 111)
     expect(o.hasUnusedCode('telegram')).toBe(false)
   })
+
+  it('an invite decides what someone gets before they ever use it', () => {
+    const o = fresh()
+    const code = o.mintCode('telegram', 'member')
+    expect(o.claim('telegram', code, 222, 'Anna')).toBe(true)
+    expect(o.role('telegram', 222)).toBe('member')
+    // Paired, and allowed to talk — but their tap is not an approval.
+    expect(o.isOwner('telegram', 222)).toBe(true)
+    expect(o.canApprove('telegram', 222)).toBe(false)
+    expect(o.canAdmin('telegram', 222)).toBe(false)
+  })
+
+  it('an approver may answer cards but not run the place', () => {
+    const o = fresh()
+    o.claim('telegram', o.mintCode('telegram', 'approver'), 333)
+    expect(o.canApprove('telegram', 333)).toBe(true)
+    expect(o.canAdmin('telegram', 333)).toBe(false)
+  })
+
+  it('the first pairing is still an owner, so nothing changes for one person', () => {
+    const o = fresh()
+    o.claim('telegram', o.mintCode('telegram'), 111)
+    expect(o.role('telegram', 111)).toBe('owner')
+    expect(o.canApprove('telegram', 111)).toBe(true)
+    expect(o.canAdmin('telegram', 111)).toBe(true)
+  })
+
+  it('a role can be changed after the fact', () => {
+    const o = fresh()
+    o.claim('telegram', o.mintCode('telegram', 'member'), 444)
+    o.setRole('telegram', 444, 'approver')
+    expect(o.canApprove('telegram', 444)).toBe(true)
+  })
+
+  it('a stranger is neither', () => {
+    const o = fresh()
+    expect(o.canApprove('telegram', 999)).toBe(false)
+    expect(o.role('telegram', 999)).toBeUndefined()
+  })
 })
 

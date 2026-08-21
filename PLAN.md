@@ -253,8 +253,8 @@ measured and is mostly wrong; the ADR now carries the numbers.
 - [ ] Mobile spike and ADR: Tauri 2 mobile vs React Native against the existing UI.
 - [ ] Remote daemon access, tailnet-style first, since it avoids running public infra.
 - [ ] Cloud image (Dockerfile plus docs), API-key-first auth flows, and the consumer-auth policy warning, with the one-login-one-machine rule enforced in docs and checked where the code can.
-- [ ] Per-member identity and roles extending the existing audit log schema; approval routing.
-- [ ] Team onboarding docs.
+- [x] Per-member identity and roles ([docs](docs/teams.md)): owner, approver and member, where being paired is deliberately not the same as being allowed to approve. The role travels with the invite code, so what someone gets is decided before they use it. Every human decision is attributed in the audit row itself rather than a join away, and decisions no human made carry no name — attributing those to somebody would be a lie. The first pairing is still an owner, so nothing changes for one person. Approval **routing** is not built: every approver sees every card.
+- [x] Team onboarding docs, including what this does not do yet.
 
 **Exit criteria.** A bot runs for a week on a cloud box with zero laptop involvement, on API-key credentials, with its usage visible to its owner. A second team member chats with a shared bot and approves its actions under their own identity, and the audit log attributes every decision.
 

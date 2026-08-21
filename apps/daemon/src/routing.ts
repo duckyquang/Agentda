@@ -140,5 +140,12 @@ export class Serial {
   get busy(): number {
     return this.chains.size
   }
+
+  // Whether THIS key has work in flight. The count above answers a different
+  // question, and using it to decide whether one bot may start something meant
+  // any bot being busy blocked every other one.
+  isBusy(key: string): boolean {
+    return this.chains.has(key)
+  }
 }
 

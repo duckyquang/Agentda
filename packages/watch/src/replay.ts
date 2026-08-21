@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import type { AgentEvent, ProviderAdapter, Routine, RoutineStep } from '@agentda/core'
 import { parseExpect, validateRoutine, verbTool } from '@agentda/core'
-import { chromium, type Locator, type Page } from 'playwright'
+import { type BrowserContext, chromium, type Locator, type Page } from 'playwright'
 import { describeRung, resolveStep, type Rung } from './ladder'
 
 // Replay is a provider.
@@ -21,8 +21,8 @@ import { describeRung, resolveStep, type Rung } from './ladder'
 export interface ReplayOptions {
   routine: Routine
   profileDir: string
-  // Where the bot's browser posts frames, so a replay is watchable in the
-  // desktop app exactly like a model-driven session.
+  // Where to post screencast frames, so a replay is watchable in the app
+  // exactly like a model-driven session.
   previewUrl?: string
   headed?: boolean
   // Called when the routine gives up, so the daemon can hand the human the
@@ -65,6 +65,7 @@ export class ReplayAdapter implements ProviderAdapter {
       viewport: { width: 1280, height: 900 },
     })
     const page = ctx.pages()[0] ?? (await ctx.newPage())
+    await streamTo(ctx, page, replay.previewUrl)
     const done: string[] = []
 
     // A stop is both something the human reads and something the live
@@ -146,6 +147,24 @@ export class ReplayAdapter implements ProviderAdapter {
         : 'I did not get past the first step.',
     }
     yield { type: 'result', sessionId: 'replay', raw: {} }
+  }
+}
+
+// The same CDP screencast the browser server uses, so a routine replaying
+// unattended is watchable in the app rather than a black box that reports
+// afterwards.
+async function streamTo(ctx: BrowserContext, page: Page, previewUrl?: string): Promise<void> {
+  if (!previewUrl) return
+  try {
+    const cdp = await ctx.newCDPSession(page)
+    cdp.on('Page.screencastFrame', async (frame: { data: string; sessionId: number }) => {
+      await cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {})
+      await fetch(previewUrl, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: frame.data }).catch(() => {})
+    })
+    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: 1024, maxHeight: 768, everyNthFrame: 2 })
+  } catch {
+    // Not being watchable is a missing convenience, not a reason to refuse to
+    // replay.
   }
 }
 

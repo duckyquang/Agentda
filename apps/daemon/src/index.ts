@@ -299,7 +299,7 @@ const api = new ControlApi({
   startRecording: async (botId, url) => {
     const p = personas.find((x) => x.id === botId)
     if (!p) throw new Error(`no bot named ${botId}`)
-    if (turns.busy) throw new Error(`${botId} is in the middle of a turn — a recording opens the same browser profile`)
+    if (turns.isBusy(botId)) throw new Error(`${botId} is in the middle of a turn — a recording opens the same browser profile`)
     await recordings.start(p, url, (n) => api.emit('recording', { bot: botId, steps: n }))
     api.emit('recording', { bot: botId, steps: 0 })
   },

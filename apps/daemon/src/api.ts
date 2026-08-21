@@ -329,8 +329,8 @@ export class ControlApi {
           const ok = this.deps.queue.settle(
             body.id,
             amending
-              ? { decision: 'deny', source: 'human-text', reason: amendmentReason(amending) }
-              : { decision: body.decision === 'allow' ? 'allow' : 'deny', source: 'human-tap' },
+              ? { decision: 'deny', source: 'human-text', reason: amendmentReason(amending), by: 'desktop' }
+              : { decision: body.decision === 'allow' ? 'allow' : 'deny', source: 'human-tap', by: 'desktop' },
           )
           return void json(200, { settled: ok })
         }

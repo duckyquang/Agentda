@@ -75,7 +75,7 @@ const recording = (): RawAction[] => [
   { name: 'click', ref: 'e8', selector: 'internal:role=button[name="Send payment"i]' },
 ]
 
-function bot(opts: { mode?: 'ask' | 'auto'; alwaysAsk?: string } = {}) {
+function bot(opts: { mode?: 'ask' | 'auto'; alwaysAsk?: string; preview?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'agentda-replay-'))
   roots.push(root)
   const dir = join(root, 'bots', 'runner')
@@ -123,6 +123,7 @@ function bot(opts: { mode?: 'ask' | 'auto'; alwaysAsk?: string } = {}) {
         replay: {
           routine: loadRoutine(path),
           profileDir: join(dir, 'browser-profile'),
+          previewUrl: opts.preview,
           onHandback: (reason: string) => void handbacks.push(reason),
         },
       },
@@ -201,6 +202,30 @@ describe.runIf(live)('replaying a recorded routine', () => {
     expect(b.handbacks.join(' ')).toMatch(/matches 2 elements/)
     // It never asked about the click, because there was nothing honest to ask.
     expect(b.asked).not.toContain('mcp__browser__browser_click')
+  })
+
+  it('is watchable while it runs, like any other browsing', async () => {
+    variant = 'v1'
+    const frames: string[] = []
+    const sink = createServer((req, res) => {
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        frames.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+      })
+    })
+    await new Promise<void>((r) => sink.listen(0, '127.0.0.1', () => r()))
+    const previewUrl = `http://127.0.0.1:${(sink.address() as { port: number }).port}/frames`
+
+    const b = bot({ preview: previewUrl })
+    await b.run()
+    sink.close()
+
+    // A routine replaying unattended should not be a black box that reports
+    // afterwards.
+    expect(frames.length).toBeGreaterThan(0)
+    expect(frames[0].startsWith('/9j/')).toBe(true)
   })
 
   it('refuses a routine nobody has reviewed, before opening a browser', async () => {

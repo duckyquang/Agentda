@@ -33,6 +33,7 @@ import { AnthropicClient, ApiAdapter, GeminiClient, OpenAICompatClient } from '@
 import { ControlApi } from './api'
 import { createDiscordBridge } from './discord'
 import { createSlackBridge } from './slack'
+import { planDispatch, type Speaker, Speakers } from './routing'
 import { createBridge } from './telegram'
 
 const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
@@ -86,8 +87,8 @@ const queue = new ApprovalQueue(db, {
     // unawaited, take the daemon down with it.
     // Desktop turns carry `desktop:<bot>`, which no chat bridge can post to;
     // those cards live in the app's own inbox.
-    const chat = req.chat && routeFor.has(req.chat) ? req.chat : chatFor.get(req.bot)
-    const speaker = chat ? speakerFor(req.bot, chat) : undefined
+    const chat = req.chat && speakers.knows(req.chat) ? req.chat : chatFor.get(req.bot)
+    const speaker = chat ? speakers.for(req.bot, chat) : undefined
     if (chat && speaker) void speaker.ask(req, chat).catch((e: Error) => console.warn(`${speaker.platform} ask failed: ${e.message}`))
   },
   onResolved: (req, r) => {
@@ -97,7 +98,7 @@ const queue = new ApprovalQueue(db, {
     // Whichever bridge posted the card owns it; the others no-op on an id they
     // never saw.
     if (r.source !== 'human-tap') {
-      for (const s of speakers) void s.closeCard(req.id, `${r.decision} (${r.source})`)
+      for (const s of speakers.list()) void s.closeCard(req.id, `${r.decision} (${r.source})`)
     }
   },
 })
@@ -309,29 +310,13 @@ console.log(`desktop UI at ${api.url()}`)
 // Slack and Discord are one app each, which is what those platforms give you.
 // Owner pairing is per platform account, so a second Telegram token needs no
 // second pairing.
-interface Speaker {
-  platform: string
-  send: (chat: string, text: string) => Promise<unknown>
+interface Bridged extends Speaker {
   ask: (req: ApprovalRequest, chat: string) => Promise<void>
   closeCard: (id: string, outcome: string) => Promise<void>
   checklist: (chat: string, title: string) => LiveChecklist
-  stop: () => Promise<unknown>
 }
 
-const SHARED = ''
-const telegramSpeakers = new Map<string, Speaker>() // bot id, or SHARED
-const speakers = new Set<Speaker>()
-// Which bridge a chat is reachable on, learned from the messages that arrive
-// there. A daemon that has never heard from a chat cannot post into it anyway.
-const routeFor = new Map<string, Speaker>()
-
-// The bot's own Telegram identity wins when it has one; otherwise whoever owns
-// the thread the message came from.
-function speakerFor(botId: string, chat: string): Speaker | undefined {
-  const via = routeFor.get(chat)
-  if (via?.platform === 'telegram') return telegramSpeakers.get(botId) ?? via
-  return via
-}
+const speakers = new Speakers<Bridged>()
 
 function bridgeHost(bound?: string) {
   return {
@@ -351,9 +336,9 @@ function bridgeHost(bound?: string) {
 // Remembers which bridge a chat belongs to, so replies and approval cards go
 // back the way they came. The holder exists because the host has to be built
 // before the bridge, and the speaker wraps the bridge.
-function withRoute(holder: { speaker?: Speaker }, host: ReturnType<typeof bridgeHost>): ReturnType<typeof bridgeHost> {
+function withRoute(holder: { speaker?: Bridged }, host: ReturnType<typeof bridgeHost>): ReturnType<typeof bridgeHost> {
   const note = (chat: string) => {
-    if (holder.speaker) routeFor.set(chat, holder.speaker)
+    if (holder.speaker) speakers.remember(chat, holder.speaker)
   }
   return {
     ...host,
@@ -368,29 +353,23 @@ function withRoute(holder: { speaker?: Speaker }, host: ReturnType<typeof bridge
   }
 }
 
-function register(holder: { speaker?: Speaker }, speaker: Speaker): Speaker {
+function register(holder: { speaker?: Bridged }, speaker: Bridged, telegramKey?: string): Bridged {
   holder.speaker = speaker
-  speakers.add(speaker)
-  return speaker
+  return speakers.add(speaker, telegramKey)
 }
 
 function startTelegram(key: string, botToken: string, bound?: string): void {
-  const holder: { speaker?: Speaker } = {}
+  const holder: { speaker?: Bridged } = {}
   const bridge = createBridge({ token: botToken, voice: voiceConfigFromEnv(), ...withRoute(holder, bridgeHost(bound)) })
-  const speaker = register(holder, {
-    platform: 'telegram',
-    send: bridge.send,
-    ask: bridge.ask,
-    closeCard: bridge.closeCard,
-    checklist: bridge.checklist,
-    stop: bridge.stop,
-  })
-  telegramSpeakers.set(key, speaker)
+  const speaker = register(
+    holder,
+    { platform: 'telegram', send: bridge.send, ask: bridge.ask, closeCard: bridge.closeCard, checklist: bridge.checklist, stop: bridge.stop },
+    key,
+  )
   void bridge
     .start((me) => console.log(`${bound ?? 'shared'} Telegram bridge live as @${me.username}`))
     .catch((err) => {
-      telegramSpeakers.delete(key)
-      speakers.delete(speaker)
+      speakers.remove(speaker)
       const e = err as { error_code?: number; message: string }
       console.error(
         e.error_code === 401
@@ -407,14 +386,14 @@ function startTelegram(key: string, botToken: string, bound?: string): void {
 function syncBridges(): void {
   for (const p of personas) {
     const t = tokens.get(p.id)
-    if (t && !telegramSpeakers.has(p.id)) startTelegram(p.id, t, p.id)
+    if (t && !speakers.hasTelegram(p.id)) startTelegram(p.id, t, p.id)
   }
-  for (const [key, speaker] of telegramSpeakers) {
-    if (key === SHARED) continue
+  // Walk the running bridges, not the registry: a token that was just removed
+  // is no longer in the registry, and its bridge would poll on forever.
+  for (const key of speakers.telegramKeys()) {
+    if (key === Speakers.SHARED) continue
     if (!tokens.get(key) || !personas.some((p) => p.id === key)) {
-      telegramSpeakers.delete(key)
-      speakers.delete(speaker)
-      void speaker.stop().catch(() => {})
+      void speakers.removeTelegram(key)?.stop().catch(() => {})
     }
   }
 }
@@ -422,11 +401,11 @@ function syncBridges(): void {
 // Every bridge is optional: with none of them the daemon still serves the
 // desktop app, which is the whole point of not coupling them.
 const sharedToken = process.env.TELEGRAM_BOT_TOKEN
-if (sharedToken) startTelegram(SHARED, sharedToken)
+if (sharedToken) startTelegram(Speakers.SHARED, sharedToken)
 syncBridges()
 
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-  const holder: { speaker?: Speaker } = {}
+  const holder: { speaker?: Bridged } = {}
   const slack = createSlackBridge({
     botToken: process.env.SLACK_BOT_TOKEN,
     appToken: process.env.SLACK_APP_TOKEN,
@@ -444,7 +423,7 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 }
 
 if (process.env.DISCORD_BOT_TOKEN) {
-  const holder: { speaker?: Speaker } = {}
+  const holder: { speaker?: Bridged } = {}
   const discord = createDiscordBridge({ token: process.env.DISCORD_BOT_TOKEN, ...withRoute(holder, bridgeHost()) })
   register(holder, {
     platform: 'discord',
@@ -466,7 +445,7 @@ if (!speakers.size) {
 async function say(persona: Persona, chat: string, text: string): Promise<void> {
   if (!text) return
   api.emit('message-out', { bot: persona.id, text })
-  const speaker = speakerFor(persona.id, chat)
+  const speaker = speakers.for(persona.id, chat)
   if (!speaker) return
   await speaker.send(chat, text).catch((e: Error) => console.warn(`${speaker.platform} send failed: ${e.message}`))
 }
@@ -548,7 +527,7 @@ async function runTurn(persona: Persona, chat: string, input: string, task: stri
   // turn happens rather than summarised at the end. Chat gets the same thing as
   // one message edited in place.
   api.emit('activity', { bot: persona.id, kind: 'start' })
-  const list = speakerFor(persona.id, chat)?.checklist(chat, `${persona.id} is working on it…`)
+  const list = speakers.for(persona.id, chat)?.checklist(chat, `${persona.id} is working on it…`)
   if (list) liveLists.set(persona.id, list)
   const res = await runner
     .run(persona, chat, input, {
@@ -595,32 +574,25 @@ async function runTurn(persona: Persona, chat: string, input: string, task: stri
 // same per-task cap, because two models passing work back and forth is the
 // fastest way to burn a plan window.
 async function dispatchHandoffs(persona: Persona, chat: string, text: string, task: string): Promise<void> {
-  const all = parseHandoffs(text)
-  // Only the trailing lines count, so nothing can smuggle a handoff into the
-  // middle of a reply. Planners do produce stray ones though — say so instead
-  // of quietly acting on half a plan.
-  const looksLikeHandoff = text.split('\n').filter((l) => /^@[\w-]+\s*[::]\s*.+$/.test(l.trim())).length
-  if (looksLikeHandoff > all.length) {
-    await say(persona, chat, `↪︎ ignored ${looksLikeHandoff - all.length} handoff line(s) that weren't at the end of the message`)
+  const plan = planDispatch(text, persona, personas)
+  if (plan.ignored) {
+    await say(persona, chat, `↪︎ ignored ${plan.ignored} handoff line(s) that weren't at the end of the message`)
   }
-  if (!all.length) return
-  const targets = (persona.coordinator ? all : all.slice(-1))
-    .map((h) => ({ ...h, persona: personas.find((p) => p.id.toLowerCase() === h.to.toLowerCase()) }))
-    .filter((h) => h.persona && h.persona.id !== persona.id)
-  if (!targets.length) return
+  for (const name of plan.unknown) await say(persona, chat, `↪︎ there is no bot called ${name}`)
+  if (!plan.targets.length) return
 
   const results: string[] = []
-  for (const t of targets) {
-    const gate = tryHandoff(db, { chat, task, from: persona.id, to: t.persona!.id, note: t.note })
+  for (const t of plan.targets) {
+    const gate = tryHandoff(db, { chat, task, from: persona.id, to: t.persona.id, note: t.note })
     if (!gate.ok) {
       await say(persona, chat, `↪︎ ${gate.reason}`)
       break
     }
-    await say(persona, chat, `↪︎ handing this to ${t.persona!.id}`)
+    await say(persona, chat, `↪︎ handing this to ${t.persona.id}`)
     // The receiving bot answers through its own bridge, so a handoff in a
     // group chat reads as two bots talking rather than one narrating both.
-    const answer = await runTurn(t.persona!, chat, `${persona.id} handed this to you: ${t.note}`, task)
-    if (answer) results.push(`${t.persona!.id}: ${answer}`)
+    const answer = await runTurn(t.persona, chat, `${persona.id} handed this to you: ${t.note}`, task)
+    if (answer) results.push(`${t.persona.id}: ${answer}`)
   }
 
   // Only a coordinator gets the last word. Giving every bot one would make any
@@ -641,9 +613,8 @@ function stripAddress(text: string, p: Persona): string {
 
 // One pairing code per platform in use: a bot handle is public everywhere, so
 // every platform has to learn which human is the owner.
-for (const platform of ['telegram', 'slack', 'discord']) {
-  const running = [...speakers].some((s) => s.platform === platform)
-  if (running && owners.count(platform) === 0) {
+for (const platform of speakers.platforms()) {
+  if (owners.count(platform) === 0) {
     console.log(
       `\nPAIRING CODE (${platform}): ${owners.mintCode(platform)}\nSend this code to your bot on ${platform} to claim it. Until then it answers nobody.\n`,
     )
@@ -657,7 +628,7 @@ const shutdown = async (code = 0) => {
   console.log('\nshutting down…')
   scheduler.stop()
   queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
-  await Promise.all([...speakers].map((s) => s.stop().catch(() => {})))
+  await Promise.all(speakers.list().map((s) => s.stop().catch(() => {})))
   await hook.close().catch(() => {})
   await api.close().catch(() => {})
   db.close()

@@ -106,7 +106,7 @@ Each of these is a persona folder: prompt, tools, routines, gates. The daemon do
 
 ## Project status
 
-Alpha, and Phases 0 through 4 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, a second and third provider with failover, the desktop app, three chat bridges on one shared set of rules, tool packs, recorded routines you can read before they run, and a containerised desktop for work a browser cannot reach.
+Alpha, and Phases 0 through 5 are built: the daemon, the approval gate with its audit log, Ask/Auto modes, per-bot memory, browser hands on both surfaces, multi-bot handoffs, scheduled routines, usage guardrails, a second and third provider with failover, the desktop app, three chat bridges on one shared set of rules, tool packs, recorded routines you can read before they run, and a containerised desktop for work a browser cannot reach.
 
 What has actually been run, and when, is written down rather than implied. Against the real `claude` CLI on 2026-08-13: gated actions block and only run on approval, denials stop the action, unanswered approvals time out to deny, Auto mode runs unattended while the always-ask list still blocks, memory survives a restart, a bot browses a real page with zero windows on screen, and two bots complete a task with a visible handoff and stop at the cap. Against a local Ollama model and real Chromium on 2026-08-18: an approval card streams to the desktop with its payload and runs only once approved, a typed amendment comes back as a revised card with the corrected payload, screencast frames reach the window and take-over refuses the bot the page, and every shipped tool pack was launched and checked against what it actually exposes.
 
@@ -116,7 +116,11 @@ Watch-and-learn ships too: record yourself doing a task once and the bot writes 
 
 One Phase 4 item is deliberately not built: driving your *real* desktop. It is the most dangerous thing in this product, and the parts that would make it safe — an always-on-top stop control and auto-pause the moment you touch the keyboard — have to be verified with a human at the machine, not merely written.
 
-Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order. Phase 5 is next: off the laptop, a phone-native app, and small-team use.
+Off the laptop too: a [cloud image](packages/cloud-image/README.md) that runs the daemon on a box that doesn't sleep — API-key-first, with the vendor CLIs deliberately absent — and [roles](docs/teams.md) for more than one person, where being paired is not the same as being allowed to approve, and every decision carries the name of whoever made it.
+
+Two things are deliberately not built, each for a stated reason rather than because we ran out of time: driving your **real** desktop, whose safety parts must be verified with a human at the machine rather than merely written; and a **native mobile app**, because the spike found the blocker was the page rather than the wrapper — the layout is fixed and works on a phone today, and a wrapper waits until push notifications make it worth one ([ADR 0009](docs/adr/0009-mobile.md)).
+
+Read [PRD.md](PRD.md) for what we are building and why, and [PLAN.md](PLAN.md) for the phased build order and what each phase actually verified.
 
 ## Quickstart
 

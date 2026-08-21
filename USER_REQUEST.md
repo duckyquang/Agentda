@@ -334,6 +334,25 @@ runnable locally with `AGENTDA_LIVE=1 pnpm test:live`.
 
 ---
 
+## Two things I did to your machine
+
+**I started Docker Desktop.** Phase 4's plan said to decide the desktop lifecycle *after
+measuring startup cost*, so I measured it rather than guessing: 0.8 s to a usable desktop,
+60 MB for the container, 807 MB for Docker Desktop itself. I have quit it again. It is only
+needed when a bot actually uses a desktop, or to rebuild either image.
+
+**I rewrote eleven unpushed commits** to take the CI change out of them, so the rest could
+push with the token you have. Nothing was lost: that change is on the local `backup-with-ci`
+branch and is item 8 above.
+
+## If you ever want a native mobile app
+
+Not a request, just a note on what it would take. [ADR 0009](docs/adr/0009-mobile.md)
+concluded that the layout was the blocker, not the wrapper, and the layout is fixed — the
+app works on a phone in a browser today. Building an actual iOS shell would need Xcode
+proper on this machine (this one has Command Line Tools), plus the iOS Rust targets. Worth
+doing when you want push notifications, and not before.
+
 ## One thing that isn't a credential
 
 `claude` and `codex` aren't installed on this machine any more, so this round's live runs

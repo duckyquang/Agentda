@@ -38,6 +38,15 @@ export interface ApiDeps {
   reload: () => number
   // Tool packs available to install on a bot, with what each still needs.
   packs: () => { id: string; name: string; description: string; docs?: string; verified?: string; missing: string[]; outbound: string[] }[]
+  // Watch-and-learn: record what the human does, then replay it.
+  recordings: () => { bot: string; startedAt: string; steps: number }[]
+  startRecording: (botId: string, url?: string) => Promise<void>
+  stopRecording: (botId: string, routineId: string, cron: string) => Promise<{ path: string; steps: number; notes: string[] }>
+  discardRecording: (botId: string) => Promise<boolean>
+  // The recorded script behind a routine, so the human can read it before
+  // turning it on — and say that they have.
+  routineSteps: (botId: string, routineId: string) => { path: string; source: string } | undefined
+  reviewRoutine: (botId: string, routineId: string, reviewed: boolean) => void
 }
 
 // What the browser server is told to do next. Frames flow one way; this is the
@@ -167,6 +176,41 @@ export class ControlApi {
           routines: p.routines,
           ownIdentity: this.deps.tokenIds().includes(p.id),
         })
+      }
+
+      const recordRoute = /^\/api\/record\/([\w-]+)$/.exec(url.pathname)
+      if (recordRoute) {
+        const bot = recordRoute[1]
+        if (req.method === 'GET') return void json(200, { recording: this.deps.recordings().find((r) => r.bot === bot) ?? null })
+        const body = await readBody(req)
+        try {
+          if (req.method === 'DELETE') return void json(200, { discarded: await this.deps.discardRecording(bot) })
+          if (body.action === 'stop') {
+            return void json(200, await this.deps.stopRecording(bot, String(body.routine ?? 'recorded'), String(body.cron ?? '0 9 * * 1')))
+          }
+          await this.deps.startRecording(bot, body.url ? String(body.url) : undefined)
+          return void json(200, { recording: true })
+        } catch (err) {
+          return void json(400, { error: (err as Error).message })
+        }
+      }
+
+      const routineRoute = /^\/api\/routines\/([\w-]+)\/([\w-]+)$/.exec(url.pathname)
+      if (routineRoute) {
+        const [, bot, routine] = routineRoute
+        if (req.method === 'GET') {
+          const steps = this.deps.routineSteps(bot, routine)
+          return steps ? void json(200, steps) : void json(404, { error: 'that routine has no recorded steps' })
+        }
+        if (req.method === 'POST') {
+          const body = await readBody(req)
+          try {
+            this.deps.reviewRoutine(bot, routine, body.reviewed !== false)
+            return void json(200, { ok: true })
+          } catch (err) {
+            return void json(400, { error: (err as Error).message })
+          }
+        }
       }
 
       if (req.method === 'GET' && url.pathname === '/api/packs') {
@@ -363,6 +407,13 @@ export class ControlApi {
 
   url(): string {
     return `http://127.0.0.1:${this.port}/?token=${this.token}`
+  }
+
+  // A routine that gave up hands the human its browser where it stopped, which
+  // is the same thing the desktop's Take over button does.
+  setBrowserControl(botId: string, control: BrowserControl): void {
+    this.browserControl.set(botId, control)
+    this.emit('browser-control', { bot: botId, control })
   }
 
   // Handed to each bot's browser server so it knows where to send frames. Its

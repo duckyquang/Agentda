@@ -16,6 +16,7 @@ export { amendmentReason, type ApprovalReply, parseApprovalReply } from './reply
 export { fetchAudio, transcribe, type VoiceBackend, type VoiceConfig, voiceConfigFromEnv, VoiceUnavailable } from './voice'
 export { type BudgetVerdict, checkBudget, type Guardrails, recordTurn } from './budget'
 export {
+  appendRoutine,
   archivePersona,
   createPersona,
   loadPersona,

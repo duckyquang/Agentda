@@ -32,7 +32,9 @@ export interface Persona {
   // the user needs to hear about them.
   packServers?: Record<string, { command: string; args: string[]; env?: Record<string, string> }>
   packNotices?: string[]
-  routines: { id: string; cron: string; prompt: string; enabled: boolean }[]
+  // `steps` points at a recorded routine file in the bot directory. A routine
+  // with one replays that script; a routine without one is a prompt, as before.
+  routines: { id: string; cron: string; prompt: string; enabled: boolean; steps?: string }[]
   quietHours?: { start: number; end: number } // local hours, [start, end)
   dailyTurnCap?: number
   weeklyTurnCap?: number
@@ -120,6 +122,7 @@ export function loadPersona(dir: string): Persona {
           cron: String(r.cron),
           prompt: String(r.prompt),
           enabled: r.enabled !== false,
+          steps: typeof r.steps === 'string' ? join(dir, r.steps) : undefined,
         }))
       : [],
     quietHours:
@@ -308,3 +311,31 @@ export function archivePersona(botsDir: string, p: Persona, stamp = new Date().t
   renameSync(dir, dest)
   return dest
 }
+
+// Adds a routine to the end of bot.toml, leaving every byte before it alone.
+// A recorded routine arrives disabled: it has a schedule and a script, and it
+// runs when the human says so and not before.
+export function appendRoutine(
+  p: Persona,
+  routine: { id: string; cron: string; prompt: string; steps?: string; enabled?: boolean },
+): Persona {
+  if (!/^[\w-]+$/.test(routine.id)) throw new Error('routine id must be letters, digits, dashes or underscores')
+  const cfgPath = join(p.dir, 'bot.toml')
+  const before = readFileSync(cfgPath, 'utf8')
+  if (new RegExp(`^\\s*id\\s*=\\s*"${routine.id}"`, 'm').test(before.split('[[routines]]').slice(1).join(''))) {
+    throw new Error(`${p.id} already has a routine called ${routine.id}`)
+  }
+  const block = [
+    '',
+    '[[routines]]',
+    `id = ${JSON.stringify(routine.id)}`,
+    `cron = ${JSON.stringify(routine.cron)}`,
+    `prompt = ${JSON.stringify(routine.prompt)}`,
+    ...(routine.steps ? [`steps = ${JSON.stringify(routine.steps)}`] : []),
+    `enabled = ${routine.enabled === true}`,
+    '',
+  ].join('\n')
+  writeFileSync(cfgPath, before.endsWith('\n') ? before + block.slice(1) : before + block)
+  return loadPersona(p.dir)
+}
+

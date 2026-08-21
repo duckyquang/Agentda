@@ -226,11 +226,17 @@ measured and is mostly wrong; the ADR now carries the numbers.
 - [ ] Virtual desktop image: container plus lightweight desktop plus noVNC, per-bot state directories, lifecycle (spin up per task or keep warm per bot — decided by an ADR after measuring startup cost).
 - [ ] OS-level verb classification wired into the existing gate and mode system, so a native-app "send" behaves exactly like a browser "submit".
 - [ ] Real-desktop opt-in mode: per-session consent card, always-on-top stop control, auto-pause on user input.
-- [ ] Recorder: capture codegen script plus trace, convert to a routine draft with per-step annotations.
-- [ ] Replay engine: script-first, model recovery on selector failure, screenshots posted to the chat as it works.
-- [ ] Docs stating plainly what this can't do: 2FA, CAPTCHAs, and bot detection will stop it, and the bot's job then is to say so and hand back to the human.
+- [x] Recorder: drives Playwright's own recorder through a private API (pinned exactly, with a canary test whose only job is to fail when a version bump moves it), and compiles a reviewable TOML draft into the bot directory. Running it settled three things a README would not have: a typed password appears in the action AND the aria snapshot, per-session refs mean nothing tomorrow, and a positional selector silently retargets after a sibling is inserted. Each becomes a refusal rather than a footnote.
+- [x] Replay engine ([ADR 0007](docs/adr/0007-watch-and-learn.md)): a `ProviderAdapter`, so a recorded step enters through `TurnRunner` and reaches the existing gate under the tool name a model's own call would use — one policy, one audit vocabulary, and `/pause` stops a routine because `denyAll` denies the step it waits on. Finding an element again is a ladder of independent handles; ambiguity and a failed post-condition both stop rather than guess, and a denied step ends the whole routine instead of skipping into a half-filled form. Live-verified against real Chromium including a page redrawn to imitate drift.
+- [x] [Docs](docs/watch-and-learn.md) stating plainly what this can't do: 2FA, CAPTCHAs, bot detection, an expired login and a reworded checkout all stop it, and the bot's job then is to say so and hand back the browser where it stopped. No survival rate is published, because none has been measured.
+- [ ] Model re-grounding when every recorded handle misses: ask a model for a role and an accessible name from a scoped page snapshot, verify it resolves to exactly one element, then ask the human. Not built — the deterministic ladder handles the drift we have been able to produce, and adding a model to the recovery path before it is needed would put one on the path to acting.
 
-**Exit criteria.** A bot completes a task in a desktop app on the virtual desktop with one approval stop, watched live from the desktop app, while the user keeps using their own machine untouched. A recorded routine replays a week later and survives cosmetic page changes, with the model bridging the gaps.
+**Exit criteria.** Status as of 2026-08-21.
+
+- ⏳ **a bot completes a task in a desktop app on the virtual desktop** — not started. The container image and OS-level verbs are still open, and on macOS this needs a VM runtime the user installs.
+- ✅ a recorded routine replays and survives cosmetic page changes — live, against a page redrawn the way drift redraws one (hashed class renamed, form id changed, banner inserted): the recorded selectors miss and the words on the button do not.
+- ⏳ **replays a week later** is a test to run, not a claim to make. What has been measured is one machine, one day, one synthetic drift fixture.
+- ✅ the deterministic ladder bridges the gaps we could produce, so the model is not yet on the recovery path at all — which is the safer place for it to not be.
 
 **Riskiest assumption.** Two. The open web and desktop software are hostile to automation: recorded routines rot, some sites and apps will never work, replay is best-effort with a human handback path, and we make no reliability claims we haven't measured. And a containerized desktop is a heavy dependency to ship and support; if it proves too heavy, OS-level work stays a real-desktop opt-in and the isolation story leans on Phase 5's cloud boxes, where every bot naturally has its own screen.
 

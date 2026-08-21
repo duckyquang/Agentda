@@ -52,6 +52,12 @@ async function serve(over: Partial<ConstructorParameters<typeof ControlApi>[0]> 
     tokenIds: () => [],
     reload: () => 1,
     packs: () => [],
+    recordings: () => [],
+    startRecording: async () => {},
+    stopRecording: async () => ({ path: '', steps: 0, notes: [] }),
+    discardRecording: async () => false,
+    routineSteps: () => undefined,
+    reviewRoutine: () => {},
     ...over,
   }
   const api = new ControlApi(deps)

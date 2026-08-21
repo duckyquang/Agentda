@@ -60,6 +60,12 @@ async function harness() {
     tokenIds: () => [],
     reload: () => 1,
     packs: () => [],
+    recordings: () => [],
+    startRecording: async () => {},
+    stopRecording: async () => ({ path: '', steps: 0, notes: [] }),
+    discardRecording: async () => false,
+    routineSteps: () => undefined,
+    reviewRoutine: () => {},
   })
   await api.listen(0)
 

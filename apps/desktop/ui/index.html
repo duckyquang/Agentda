@@ -98,6 +98,7 @@
     <button data-view="inbox">Approvals</button>
     <button data-view="audit">Audit</button>
     <button data-view="routines">Routines</button>
+    <button data-view="record">Record</button>
     <button data-view="screen">Screen</button>
     <button data-view="settings">Settings</button>
   </header>
@@ -260,6 +261,9 @@ function renderInbox() {
   wireCards()
 }
 
+let recording = null   // {bot, steps} while a recording is open
+let reviewing = null   // {routine, source} while reading a recorded script
+
 let auditFilter = { decision: '', tool: '', scope: 'bot' }
 
 async function renderAudit() {
@@ -296,13 +300,15 @@ async function renderAudit() {
 }
 
 async function renderRoutines() {
+  if (reviewing) return renderReview()
   const { rows } = await api(`/api/routines${current ? `?bot=${encodeURIComponent(current)}` : ''}`)
   const defined = (detail && detail.routines) || []
   el('view').innerHTML =
     (defined.length
-      ? `<table><tr><th>routine</th><th>cron</th><th>prompt</th><th></th></tr>` +
-        defined.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.cron)}</td><td>${esc(r.prompt)}</td>
-          <td>${r.enabled ? '' : 'disabled'}</td></tr>`).join('') + '</table>'
+      ? `<table><tr><th>routine</th><th>cron</th><th>what it does</th><th></th></tr>` +
+        defined.map((r) => `<tr><td>${esc(r.id)}</td><td>${esc(r.cron)}</td>
+          <td>${r.steps ? 'a recorded script' : esc(r.prompt)}</td>
+          <td>${r.enabled ? '' : 'off'}${r.steps ? ` <button data-review="${esc(r.id)}">Read it</button>` : ''}</td></tr>`).join('') + '</table>'
       : '<div class="hint">No routines in this bot’s bot.toml.</div>') +
     (rows.length
       ? `<table><tr><th>ran</th><th>bot</th><th>routine</th><th>occurrence</th><th>status</th><th>detail</th></tr>` +
@@ -310,6 +316,96 @@ async function renderRoutines() {
           <td>${esc(r.occurrence)}</td><td class="${r.status}">${esc(r.status)}</td>
           <td>${esc(String(r.detail ?? '').slice(0, 120))}</td></tr>`).join('') + '</table>'
       : '<div class="empty">Nothing has fired yet.</div>')
+
+  for (const b of document.querySelectorAll('[data-review]')) {
+    b.onclick = async () => {
+      const r = await api(`/api/routines/${encodeURIComponent(current)}/${encodeURIComponent(b.dataset.review)}`)
+      if (r.error) return alert(r.error)
+      reviewing = { routine: b.dataset.review, source: r.source, path: r.path }
+      render()
+    }
+  }
+}
+
+// Reading a recorded script before it is allowed to run. This is the whole
+// safety story for watch-and-learn: a recording is a script that will act
+// unattended later, so somebody has to have read it once.
+function renderReview() {
+  const reviewed = /^reviewed = true$/m.test(reviewing.source)
+  el('view').innerHTML = `<div class="editor">
+    <div class="hint">${esc(reviewing.path)}</div>
+    <textarea id="r-src" style="min-height:50vh" readonly>${esc(reviewing.source)}</textarea>
+    <div class="hint">Steps marked <code>sensitive = true</code> stop for you every time, even in Auto.
+      A <code>handback</code> step is one I will not do for you — a password, usually.
+      Anything marked <code>fragile = true</code> stops rather than guessing.</div>
+    <div class="inline">
+      ${reviewed
+        ? '<button id="r-unreview" class="danger">Mark as not reviewed</button><span class="hint">This routine may run.</span>'
+        : '<button id="r-review" class="primary">I have read this — let it run</button><span class="hint">Until then it will refuse to replay.</span>'}
+      <button id="r-back">Back</button>
+    </div>
+  </div>`
+  el('r-back').onclick = () => { reviewing = null; render() }
+  const setReviewed = async (value) => {
+    await api(`/api/routines/${encodeURIComponent(current)}/${encodeURIComponent(reviewing.routine)}`, {
+      method: 'POST',
+      body: JSON.stringify({ reviewed: value }),
+    })
+    const r = await api(`/api/routines/${encodeURIComponent(current)}/${encodeURIComponent(reviewing.routine)}`)
+    reviewing = { ...reviewing, source: r.source }
+    render()
+  }
+  if (el('r-review')) el('r-review').onclick = () => setReviewed(true)
+  if (el('r-unreview')) el('r-unreview').onclick = () => setReviewed(false)
+}
+
+// Watch once, replay later. The window that opens is the bot's own browser
+// profile, so whatever you are logged into, it will be too.
+function renderRecord() {
+  const live = recording && recording.bot === current
+  el('view').innerHTML = `<div class="editor">
+    <div class="hint">Do the task once in the window that opens. I write down what you did as a script you can read,
+      and it stays switched off until you have read it.</div>
+    ${live
+      ? `<div class="card"><h4>Recording ${esc(current)}</h4>
+          <div class="who">${recording.steps} step${recording.steps === 1 ? '' : 's'} so far</div>
+          <label>Call it<input type="text" id="rec-name" value="recorded" /></label>
+          <label>Run it<input type="text" id="rec-cron" value="0 9 * * 1" /></label>
+          <div class="actions">
+            <button class="primary" id="rec-stop">Stop and keep it</button>
+            <button class="danger" id="rec-discard">Throw it away</button>
+          </div></div>`
+      : `<label>Start at (optional)<input type="text" id="rec-url" placeholder="https://…" /></label>
+         <div class="inline"><button class="primary" id="rec-start">Start recording</button></div>`}
+  </div>`
+
+  if (el('rec-start')) el('rec-start').onclick = async () => {
+    const r = await api(`/api/record/${encodeURIComponent(current)}`, {
+      method: 'POST',
+      body: JSON.stringify({ url: el('rec-url').value || undefined }),
+    })
+    if (r.error) return alert(r.error)
+    recording = { bot: current, steps: 0 }
+    render()
+  }
+  if (el('rec-stop')) el('rec-stop').onclick = async () => {
+    const r = await api(`/api/record/${encodeURIComponent(current)}`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'stop', routine: el('rec-name').value, cron: el('rec-cron').value }),
+    })
+    if (r.error) return alert(r.error)
+    recording = null
+    alert([`Recorded ${r.steps} steps.`, ...(r.notes || [])].join('\n\n'))
+    await refresh()
+    await loadDetail()
+    view = 'routines'
+    render()
+  }
+  if (el('rec-discard')) el('rec-discard').onclick = async () => {
+    await api(`/api/record/${encodeURIComponent(current)}`, { method: 'DELETE' })
+    recording = null
+    render()
+  }
 }
 
 // ---- bot screen -----------------------------------------------------------
@@ -521,6 +617,7 @@ function render() {
   if (view === 'inbox') return renderInbox()
   if (view === 'audit') return renderAudit()
   if (view === 'routines') return renderRoutines()
+  if (view === 'record') return renderRecord()
   if (view === 'screen') return renderScreen()
   if (view === 'settings') return renderSettings()
 }
@@ -633,6 +730,11 @@ es.addEventListener('message-out', (e) => { const d = JSON.parse(e.data); push(d
 es.addEventListener('message-in', (e) => { const d = JSON.parse(e.data); push(d.bot, 'me', d.text); render() })
 es.addEventListener('activity', (e) => { onActivity(JSON.parse(e.data)); render() })
 es.addEventListener('bots', () => refresh())
+es.addEventListener('recording', (e) => {
+  const d = JSON.parse(e.data)
+  recording = d.stopped ? null : { bot: d.bot, steps: d.steps }
+  if (view === 'record') renderRecord()
+})
 es.addEventListener('frame', (e) => {
   const d = JSON.parse(e.data)
   frames.set(d.bot, d.jpeg)

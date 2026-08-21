@@ -40,7 +40,7 @@ const persona = (id: string, over: Partial<Persona> = {}): Persona =>
     email: false,
     browserSurface: 'shadow',
     scope: [],
-    routines: [],
+    routines: [{ id: 'pay', cron: '0 9 * * 1', prompt: 'pay', enabled: false, steps: '/tmp/pay.toml' }],
     packs: [],
     coordinator: false,
     ...over,
@@ -50,6 +50,19 @@ let browser: Browser
 let page: Page
 let api: ControlApi
 let queue: ApprovalQueue
+const started: string[] = []
+let recordedSource = [
+  'version = 1',
+  'reviewed = false',
+  '',
+  '[[steps]]',
+  'n = 1',
+  'verb = "click"',
+  'name = "Send payment"',
+  'sensitive = true',
+  'fragile = false',
+  'expect = "text:Paid"',
+].join('\n')
 const sent: { bot: string; text: string }[] = []
 const patched: { bot: string; patch: PersonaPatch }[] = []
 
@@ -82,6 +95,14 @@ beforeAll(async () => {
     clearToken: () => {},
     tokenIds: () => [],
     reload: () => bots.length,
+    recordings: () => [],
+    startRecording: async (bot) => void started.push(bot),
+    stopRecording: async () => ({ path: '/tmp/pay.toml', steps: 3, notes: ['step 2 types into what looks like a password field'] }),
+    discardRecording: async () => true,
+    routineSteps: () => ({ path: '/tmp/pay.toml', source: recordedSource }),
+    reviewRoutine: (_bot, _routine, reviewed) => {
+      recordedSource = recordedSource.replace(/^reviewed = (true|false)$/m, `reviewed = ${reviewed}`)
+    },
     packs: () => [
       { id: 'files', name: 'Files', description: 'read and edit scoped files', verified: '2026-08-18: launched it', missing: [], outbound: [] },
       { id: 'mailer', name: 'Mailer', description: 'sends mail', missing: ['MAILER_TOKEN'], outbound: ['mcp__mailer__send'] },
@@ -209,4 +230,31 @@ describe.runIf(live)('desktop UI in a real browser', () => {
     await expect.poll(() => patched.at(-1)?.patch.name, { timeout: 10_000 }).toBe('Chief of Staff')
     expect(patched.at(-1)?.patch.packs).toEqual(['files'])
   })
+
+  it('records a routine and refuses to let it run until it has been read', async () => {
+    await page.locator('.bot', { hasText: 'Chief' }).click()
+    await page.click('[data-view="record"]')
+    await page.waitForSelector('#rec-start')
+    await page.fill('#rec-url', 'https://example.test/invoices')
+    await page.click('#rec-start')
+    await expect.poll(() => started, { timeout: 10_000 }).toEqual(['chief'])
+
+    await page.waitForSelector('#rec-stop')
+    await page.fill('#rec-name', 'pay')
+    page.once('dialog', (d) => void d.accept())
+    await page.click('#rec-stop')
+
+    // Straight to the routines list, where the recorded one can be read.
+    await page.waitForSelector('[data-review="pay"]')
+    await page.click('[data-review="pay"]')
+    await page.waitForSelector('#r-src')
+    // The human sees the actual script, not a summary of it.
+    expect(await page.inputValue('#r-src')).toContain('sensitive = true')
+    expect(await page.locator('#r-review').count()).toBe(1)
+
+    await page.click('#r-review')
+    await expect.poll(() => page.locator('#r-unreview').count(), { timeout: 10_000 }).toBe(1)
+    expect(recordedSource).toContain('reviewed = true')
+  })
 })
+

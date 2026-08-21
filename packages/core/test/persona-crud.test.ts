@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { archivePersona, createPersona, loadPersona, loadPersonas, setConfigValues, updatePersona } from '../src/index'
+import { appendRoutine, archivePersona, createPersona, loadPersona, loadPersonas, setConfigValues, updatePersona } from '../src/index'
 
 const botsDir = () => mkdtempSync(join(tmpdir(), 'agentda-bots-'))
 
@@ -105,6 +105,36 @@ describe('creating and editing a bot from the app', () => {
     expect(readFileSync(join(bots, 'chief', 'bot.toml'), 'utf8')).toBe(before)
     expect(readFileSync(join(bots, 'chief', 'prompt.md'), 'utf8')).not.toBe('changed')
     expect(loadPersona(join(bots, 'chief')).id).toBe('chief')
+  })
+
+  it('appends a recorded routine without disturbing a byte of what came before', () => {
+    const bots = botsDir()
+    const p = createPersona(bots, { id: 'scout' })
+    const cfg = join(bots, 'scout', 'bot.toml')
+    writeFileSync(cfg, '# my scout\nid = "scout"\nname = "Scout"\nmode = "ask"\n\n# the morning one\n[[routines]]\nid = "am"\ncron = "0 9 * * *"\nprompt = "check the inbox"\n')
+    const before = readFileSync(cfg, 'utf8')
+
+    const after = appendRoutine(loadPersona(join(bots, 'scout')), {
+      id: 'pay',
+      cron: '0 9 * * 1',
+      prompt: 'pay the weekly invoice',
+      steps: 'pay.toml',
+    })
+    const src = readFileSync(cfg, 'utf8')
+    expect(src.startsWith(before)).toBe(true)
+    expect(src).toContain('# the morning one')
+    expect(after.routines.map((r) => r.id)).toEqual(['am', 'pay'])
+    // A recorded routine arrives switched off. It has a schedule and a script;
+    // it runs when the human says so.
+    expect(after.routines[1].enabled).toBe(false)
+    expect(after.routines[1].steps).toContain('pay.toml')
+  })
+
+  it('refuses a second routine with the same id, rather than shadowing the first', () => {
+    const bots = botsDir()
+    const p = createPersona(bots, { id: 'scout' })
+    const one = appendRoutine(p, { id: 'pay', cron: '0 9 * * 1', prompt: 'pay' })
+    expect(() => appendRoutine(one, { id: 'pay', cron: '0 10 * * 1', prompt: 'pay again' })).toThrow(/already has a routine/)
   })
 })
 

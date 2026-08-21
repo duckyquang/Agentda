@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,11 +12,13 @@ import {
   type LiveChecklist,
   loadPacks,
   loadPersonas,
+  loadRoutine,
   missingEnv,
   openDb,
   Owners,
   parseHandoffs,
   type Persona,
+  refuseReplayOnCodex,
   Scheduler,
   SessionStore,
   setPersonaMode,
@@ -30,9 +33,11 @@ import {
 import { ClaudeAdapter } from '@agentda/provider-claude'
 import { CodexAdapter } from '@agentda/provider-codex'
 import { AnthropicClient, ApiAdapter, GeminiClient, OpenAICompatClient } from '@agentda/provider-api'
+import { ReplayAdapter } from '@agentda/watch'
 import { ControlApi } from './api'
 import { createDiscordBridge } from './discord'
 import { createSlackBridge } from './slack'
+import { Recordings } from './recording'
 import { planDispatch, Serial, type Speaker, Speakers } from './routing'
 import { createBridge } from './telegram'
 
@@ -177,6 +182,9 @@ function buildAdapters(): Map<string, any> {
   const m = new Map<string, any>([
     ['claude', new ClaudeAdapter()],
     ['codex', new CodexAdapter()],
+    // Replay is a provider like any other, which is what puts a recorded step
+    // through the same gate a model's tool call goes through.
+    ['replay', new ReplayAdapter()],
   ])
   const model = (fallback: string) => process.env.AGENTDA_API_MODEL ?? fallback
   if (process.env.ANTHROPIC_API_KEY) {
@@ -273,6 +281,41 @@ const api = new ControlApi({
     api.emit('bots', { changed: botId })
   },
   tokenIds: () => tokens.ids(),
+  recordings: () => recordings.list(),
+  startRecording: async (botId, url) => {
+    const p = personas.find((x) => x.id === botId)
+    if (!p) throw new Error(`no bot named ${botId}`)
+    if (turns.busy) throw new Error(`${botId} is in the middle of a turn — a recording opens the same browser profile`)
+    await recordings.start(p, url, (n) => api.emit('recording', { bot: botId, steps: n }))
+    api.emit('recording', { bot: botId, steps: 0 })
+  },
+  stopRecording: async (botId, routineId, cron) => {
+    const p = personas.find((x) => x.id === botId)
+    if (!p) throw new Error(`no bot named ${botId}`)
+    const out = await recordings.stop(p, routineId, cron)
+    personas = readPersonas()
+    api.emit('bots', { changed: botId })
+    api.emit('recording', { bot: botId, steps: 0, stopped: true })
+    return out
+  },
+  discardRecording: async (botId) => {
+    const stopped = await recordings.discard(botId)
+    api.emit('recording', { bot: botId, steps: 0, stopped: true })
+    return stopped
+  },
+  routineSteps: (botId, routineId) => {
+    const routine = personas.find((x) => x.id === botId)?.routines.find((r) => r.id === routineId)
+    return routine?.steps ? { path: routine.steps, source: readFileSync(routine.steps, 'utf8') } : undefined
+  },
+  reviewRoutine: (botId, routineId, reviewed) => {
+    const routine = personas.find((x) => x.id === botId)?.routines.find((r) => r.id === routineId)
+    if (!routine?.steps) throw new Error('that routine has no recorded steps')
+    // The one line that decides whether a recording may run at all, flipped in
+    // the file the human just read rather than in a database they cannot see.
+    const src = readFileSync(routine.steps, 'utf8')
+    writeFileSync(routine.steps, src.replace(/^reviewed = (true|false)$/m, `reviewed = ${reviewed}`))
+    api.emit('bots', { changed: botId })
+  },
   packs: () => {
     const packs = loadPacks(...packDirs)
     return packs.map((p) => ({
@@ -505,16 +548,52 @@ async function handleCommand(cmd: string, args: string, chat: string, reply: (s:
   }
   if (cmd === 'routines') {
     return reply(
-      personas.flatMap((p) => p.routines.map((r) => `${p.id}/${r.id} ${r.cron} ${r.enabled ? '' : '(disabled)'}`)).join('\n') ||
-        'no routines',
+      personas
+        .flatMap((p) =>
+          p.routines.map((r) => `${p.id}/${r.id} ${r.cron}${r.steps ? ' (recorded)' : ''}${r.enabled ? '' : ' — off'}`),
+        )
+        .join('\n') || 'no routines',
     )
+  }
+  if (cmd === 'record') {
+    // Recording opens a window on this machine and needs a human in front of
+    // it, so from chat this can only start and stop one — the reviewing happens
+    // in the app.
+    const [botId, ...rest] = args.split(/\s+/)
+    const p = personas.find((x) => x.id === botId)
+    if (!p) return reply('usage: /record <bot> <url>  ·  /record stop <bot> <name>')
+    if (botId === 'stop') return reply('usage: /record stop <bot> <name>')
+    try {
+      await recordings.start(p, rest[0])
+      return reply(`Recording ${p.id}. A browser window is open on this machine — do the task once, then send /record stop ${p.id} <name>.`)
+    } catch (err) {
+      return reply(`Could not start recording: ${(err as Error).message}`)
+    }
+  }
+  if (cmd === 'stop-recording') {
+    const [botId, name] = args.split(/\s+/)
+    const p = personas.find((x) => x.id === botId)
+    if (!p || !name) return reply('usage: /stop-recording <bot> <name>')
+    try {
+      const out = await recordings.stop(p, name, '0 9 * * 1')
+      personas = readPersonas()
+      return reply(
+        [
+          `Recorded ${out.steps} steps into ${out.path}.`,
+          ...out.notes.map((n) => `· ${n}`),
+          'It is switched off until you read it and mark it reviewed in the app.',
+        ].join('\n'),
+      )
+    } catch (err) {
+      return reply(`Could not stop recording: ${(err as Error).message}`)
+    }
   }
   if (cmd === 'reload') {
     personas = readPersonas()
     syncBridges()
     return reply(`reloaded ${personas.length} bot(s)`)
   }
-  return reply('commands: /bots /mode <bot> ask|auto /pause /resume /audit /routines /reload')
+  return reply('commands: /bots /mode <bot> ask|auto /pause /resume /audit /routines /record <bot> <url> /stop-recording <bot> <name> /reload')
 }
 
 const scheduler = new Scheduler(
@@ -530,11 +609,20 @@ const scheduler = new Scheduler(
     if (!chat) {
       return { status: 'error' as const, detail: 'no chat to post to yet — message this bot once so it knows where to reply' }
     }
+    const routine = persona.routines.find((r) => r.id === routineId)
+    const refusal = routine?.steps ? refuseReplayOnCodex(persona) : undefined
+    if (refusal) return { status: 'error' as const, detail: refusal }
+
     // Same path as a chat message, so a routine gets the live checklist, the
     // activity stream, and handoffs, and so chatFor is set for the approval
     // card this run may raise. Awaited here — unlike a chat message — because
     // the ledger row is the outcome of this run.
-    await enqueueTurn(persona, chat, prompt, `${routineId}:${randomUUID()}`, { scheduled: true })
+    await enqueueTurn(persona, chat, prompt, `${routineId}:${randomUUID()}`, {
+      scheduled: true,
+      // A routine with a recorded script replays it; one without is a prompt,
+      // as routines have always been.
+      ...(routine?.steps ? { replay: replayOptions(persona, routine.steps) } : {}),
+    })
     return { status: 'done' as const }
   },
 )
@@ -546,9 +634,41 @@ const scheduler = new Scheduler(
 // same bot share one browser profile and one memory directory, and Chromium
 // will not open a profile twice.
 const turns = new Serial()
+// A recording holds the bot's browser profile, so it takes the bot's turn slot
+// like anything else that runs for that bot.
+const recordings = new Recordings()
 
-function enqueueTurn(persona: Persona, chat: string, input: string, task: string, opts: { scheduled?: boolean } = {}): Promise<string> {
-  const queued = turns.run(persona.id, () => runTurn(persona, chat, input, task, opts))
+// What the replay provider needs to run one recorded routine for one bot.
+function replayOptions(persona: Persona, stepsPath: string) {
+  return {
+    routine: loadRoutine(stepsPath),
+    profileDir: join(persona.dir, 'browser-profile'),
+    previewUrl: api.previewUrl(persona.id),
+    onHandback: async (reason: string) => {
+      // Where it stopped is where the human should pick it up, so the browser
+      // is handed over rather than closed on them.
+      api.setBrowserControl(persona.id, 'take-over')
+      console.warn(`${persona.id} handed back a routine: ${reason}`)
+    },
+  }
+}
+
+function enqueueTurn(
+  persona: Persona,
+  chat: string,
+  input: string,
+  task: string,
+  opts: { scheduled?: boolean; replay?: unknown } = {},
+): Promise<string> {
+  const queued = turns.run(persona.id, () => {
+    if (recordings.has(persona.id)) {
+      return Promise.resolve(`${persona.id} is recording a routine right now — stop the recording first.`).then((m) => {
+        void say(persona, chat, m)
+        return m
+      })
+    }
+    return runTurn(persona, chat, input, task, opts)
+  })
   void queued.catch((err: Error) => say(persona, chat, `error: ${err.message}`))
   return queued
 }
@@ -561,7 +681,7 @@ async function runTurn(
   chat: string,
   input: string,
   task: string,
-  opts: { silent?: boolean; scheduled?: boolean } = {},
+  opts: { silent?: boolean; scheduled?: boolean; replay?: unknown } = {},
 ): Promise<string> {
   chatFor.set(persona.id, chat)
   // The desktop renders a live checklist off these, so they are emitted as the
@@ -573,6 +693,7 @@ async function runTurn(
   const res = await runner
     .run(persona, chat, input, {
       scheduled: opts.scheduled,
+      ...(opts.replay ? { provider: 'replay', adapterOptions: { replay: opts.replay } } : {}),
       onEvent: (e) => {
         if (e.type === 'result') sessionOwner.set(e.sessionId, persona.id)
         if (e.type === 'tool_call') {
@@ -664,6 +785,7 @@ const shutdown = async (code = 0) => {
   shuttingDown = true
   console.log('\nshutting down…')
   scheduler.stop()
+  await recordings.stopAll()
   queue.denyAll('daemon shutting down') // never leave a turn blocked on a dead daemon
   // Denying the open approvals is what lets a parked routine finish; give the
   // ones already running a moment to write their ledger row, because the

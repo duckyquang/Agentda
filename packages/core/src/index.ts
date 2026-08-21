@@ -32,6 +32,7 @@ export {
 export { TurnRunner, type TurnResult } from './runner'
 export { Scheduler } from './scheduler'
 export { Owners } from './owners'
+export { resolveInScope, safeMemoryName } from './scope'
 export {
   loadPack,
   loadPacks,

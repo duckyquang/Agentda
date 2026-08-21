@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import { join, resolve } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { resolveInScope, safeMemoryName } from '@agentda/core'
 import { z } from 'zod'
 
 // Agentda's own MCP server: the bot's memory, plus scoped file access. Runs as a
@@ -21,21 +22,11 @@ const memDir = join(botDir, 'memory')
 mkdirSync(memDir, { recursive: true })
 const scopes = (process.env.AGENTDA_SCOPE ?? '').split(':').filter(Boolean).map((p) => resolve(p))
 
-// Path containment: resolve first, then require the result to sit inside an
-// allowed root. Without the separator check, /home/user-secrets would pass a
-// /home/user scope.
-function inScope(p: string): string {
-  const abs = resolve(p)
-  if (!scopes.some((s) => abs === s || abs.startsWith(s + '/'))) {
-    throw new Error(`path outside this bot's allowed directories: ${abs}`)
-  }
-  return abs
-}
-
-const safeName = (f: string) => {
-  if (!/^[\w.-]+$/.test(f) || f.includes('..')) throw new Error(`invalid memory file name: ${f}`)
-  return f.endsWith('.md') ? f : `${f}.md`
-}
+// Containment and name validation live in core, next to their tests: a symlink
+// inside an allowed directory used to walk straight out of the scope, and that
+// is not a thing to reimplement per server.
+const inScope = (p: string) => resolveInScope(p, scopes)
+const safeName = safeMemoryName
 
 const server = new McpServer({ name: 'agentda', version: '0.1.0' })
 

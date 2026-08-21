@@ -31,6 +31,19 @@ export {
 } from './persona'
 export { TurnRunner, type TurnResult } from './runner'
 export { type RoutineOutcome, Scheduler } from './scheduler'
+export { type CompileResult, compileRoutine, type RawAction, renderRoutineToml } from './recorder'
+export {
+  EXPECT_KINDS,
+  type ExpectKind,
+  loadRoutine,
+  parseExpect,
+  refuseReplayOnCodex,
+  type Routine,
+  type RoutineStep,
+  type StepVerb,
+  validateRoutine,
+  verbTool,
+} from './routine'
 export { Owners } from './owners'
 export { resolveInScope, safeMemoryName } from './scope'
 export {

@@ -101,7 +101,16 @@ export class Bridge {
       if (personas.length) await reply(`Name a bot: ${personas.map((p) => p.id).join(', ')}`)
       return
     }
-    await this.host.onMessage(persona, chat, text, reply)
+
+    // NOT awaited, and this is the whole reason this line has a comment. Every
+    // one of these platforms delivers updates one at a time: while this handler
+    // waits for a turn, the platform cannot deliver the next update — and the
+    // next update is the Approve press the turn is blocked on. Awaiting here
+    // meant every gated action timed out to deny while the human looked at a
+    // card whose buttons did nothing.
+    void this.host.onMessage(persona, chat, text, reply).catch(async (err: Error) => {
+      await reply(`${persona.id} failed: ${err.message}`).catch(() => {})
+    })
   }
 
   // A button press. The security-critical check is the same everywhere: it is

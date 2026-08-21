@@ -78,9 +78,22 @@ describe('the gate knows which bot is asking', () => {
   it('bakes the bot into the settings file each turn hands its CLI', async () => {
     const g = await gate()
     const dir = mkdtempSync(join(tmpdir(), 'agentda-settings-'))
-    g.hook.writeSettings(dir, 'claude', 'scout')
-    const client = readFileSync(join(dir, 'gate-claude.mjs'), 'utf8')
-    expect(client).toContain(`/hook/secret/claude/scout`)
+    const settings = g.hook.writeSettings(dir, 'claude', 'scout')
+    expect(readFileSync(join(dir, 'gate-claude.mjs'), 'utf8')).toContain(`/hook/secret/claude/scout`)
+    expect(readFileSync(settings, 'utf8')).toContain('gate-claude.sh')
+  })
+
+  it('keeps the two providers’ settings apart, even in one directory', async () => {
+    const g = await gate()
+    // Every turn writes both into its own run directory. They used to share a
+    // filename, so the codex call replaced the file `claude --settings` was
+    // given — and Claude then ran the codex shim, whose way of saying
+    // "approved" is to print nothing, which is also what a broken shim does.
+    const dir = mkdtempSync(join(tmpdir(), 'agentda-settings-'))
+    const claude = g.hook.writeSettings(dir, 'claude', 'scout')
+    g.hook.shimPath(dir, 'codex', 'scout')
+    expect(readFileSync(claude, 'utf8')).toContain('gate-claude.sh')
+    expect(readFileSync(claude, 'utf8')).not.toContain('gate-codex.sh')
   })
 
   it('survives a bot id that is not URL-safe, since bot.toml is hand-written', async () => {

@@ -162,7 +162,11 @@ process.stdin.on('end', async () => {
       mode: 0o700,
     })
 
-    const settings = join(d, 'settings.json')
+    // Per provider, because both are written into the same directory: a
+    // shared name meant the codex call silently replaced the file handed to
+    // `claude --settings`, and Claude then ran the codex-dialect shim, whose
+    // way of saying "approved" is to print nothing at all.
+    const settings = join(d, `settings-${provider}.json`)
     writeFileSync(
       settings,
       JSON.stringify({

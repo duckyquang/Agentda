@@ -116,3 +116,29 @@ export class Speakers<S extends Speaker> {
     return [...new Set([...this.all].map((s) => s.platform))]
   }
 }
+
+// Work for one key runs one item at a time, and never on the caller's stack.
+//
+// Off the stack because a chat bridge that waits for a turn cannot deliver the
+// button press the turn is blocked on. One at a time because two turns for the
+// same bot share one browser profile and one memory directory, and Chromium
+// will not open a profile twice.
+export class Serial {
+  private chains = new Map<string, Promise<unknown>>()
+
+  run<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const queued = (this.chains.get(key) ?? Promise.resolve())
+      .catch(() => {}) // a failed item must not poison the ones behind it
+      .then(work)
+    this.chains.set(key, queued)
+    void queued.catch(() => {}).finally(() => {
+      if (this.chains.get(key) === queued) this.chains.delete(key)
+    })
+    return queued
+  }
+
+  get busy(): number {
+    return this.chains.size
+  }
+}
+

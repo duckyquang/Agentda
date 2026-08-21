@@ -33,7 +33,7 @@ import { AnthropicClient, ApiAdapter, GeminiClient, OpenAICompatClient } from '@
 import { ControlApi } from './api'
 import { createDiscordBridge } from './discord'
 import { createSlackBridge } from './slack'
-import { planDispatch, type Speaker, Speakers } from './routing'
+import { planDispatch, Serial, type Speaker, Speakers } from './routing'
 import { createBridge } from './telegram'
 
 const home = process.env.AGENTDA_HOME ?? join(homedir(), '.agentda')
@@ -220,9 +220,7 @@ function sendToBot(botId: string, text: string): void {
   // Deliberately not awaited: the turn may pause on an approval for as long as
   // the human takes, and the UI shows that card meanwhile. Same path as a chat
   // message, so the desktop gets handoffs and provider notices too.
-  void runTurn(p, `desktop:${botId}`, text, text).catch((err) =>
-    api.emit('message-out', { bot: p.id, text: `error: ${(err as Error).message}` }),
-  )
+  void enqueueTurn(p, `desktop:${botId}`, text, text)
 }
 
 const api = new ControlApi({
@@ -326,8 +324,12 @@ function bridgeHost(bound?: string) {
     personas: () => personas,
     bound: bound ? () => personas.find((p) => p.id === bound) : undefined,
     logDropped: (userId: string, why: string) => console.warn(`dropped update from ${userId}: ${why}`),
+    // NOT awaited, and this is load-bearing. A chat bridge delivers updates one
+    // at a time: while its handler waits for a turn, it cannot deliver the
+    // Approve tap that same turn is waiting for, so every gated action would
+    // time out to deny with the human staring at a card that does nothing.
     onMessage: async (persona: Persona, chat: string, text: string) => {
-      await runTurn(persona, chat, stripAddress(text, persona), text)
+      void enqueueTurn(persona, chat, stripAddress(text, persona), text)
     },
     onCommand: (cmd: string, args: string, chat: string, reply: (s: string) => Promise<void>) =>
       handleCommand(cmd, args, chat, reply),
@@ -516,14 +518,29 @@ const scheduler = new Scheduler(
     }
     // Same path as a chat message, so a routine gets the live checklist, the
     // activity stream, and handoffs, and so chatFor is set for the approval
-    // card this run may raise.
-    await runTurn(persona, chat, prompt, `routine:${routineId}`, { scheduled: true })
+    // card this run may raise. Awaited here — unlike a chat message — because
+    // the ledger row is the outcome of this run.
+    await enqueueTurn(persona, chat, prompt, `routine:${routineId}`, { scheduled: true })
     return { status: 'done' as const }
   },
 )
 
 function lastKnownChat(): string | undefined {
   return chatFor.values().next().value
+}
+
+// Turns for one bot run one at a time, and never on the caller's stack.
+//
+// Off the stack, because a chat bridge that awaits a turn cannot deliver the
+// button press the turn is blocked on. One at a time, because two turns for the
+// same bot share one browser profile and one memory directory, and Chromium
+// will not open a profile twice.
+const turns = new Serial()
+
+function enqueueTurn(persona: Persona, chat: string, input: string, task: string, opts: { scheduled?: boolean } = {}): Promise<string> {
+  const queued = turns.run(persona.id, () => runTurn(persona, chat, input, task, opts))
+  void queued.catch((err: Error) => say(persona, chat, `error: ${err.message}`))
+  return queued
 }
 
 // One turn, plus the handoff chain it may start. A bot ends its turn with

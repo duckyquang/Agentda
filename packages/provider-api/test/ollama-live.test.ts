@@ -72,7 +72,12 @@ describe.runIf(live)('agent loop against a real local model (Ollama)', () => {
     expect(text.toLowerCase()).toContain('pineapple')
   }, 180_000)
 
-  it('runs an approved MCP tool for real, and audits it', async () => {
+  // Retried, and the reason matters: what is under test is that an approved
+  // tool call really executes and really lands in the audit log. Whether an 8B
+  // model decides to reach for the tool at all on a given sample is a
+  // precondition, not the thing being checked — and it declines often enough to
+  // fail this outright roughly one run in three.
+  it('runs an approved MCP tool for real, and audits it', { retry: 3, timeout: 300_000 }, async () => {
     const s = setup('allow')
     const seen: string[] = []
     for await (const ev of adapter().startTurn(
@@ -84,9 +89,9 @@ describe.runIf(live)('agent loop against a real local model (Ollama)', () => {
     expect(seen).toContain('mcp__agentda__memory_write')
     expect(readFileSync(join(s.botDir, 'memory', 'fact.md'), 'utf8')).toMatch(/teal/i)
     expect(s.audit().some((a) => a.tool === 'mcp__agentda__memory_write' && a.decision === 'allow')).toBe(true)
-  }, 300_000)
+  })
 
-  it('a denied tool never touches the disk', async () => {
+  it('a denied tool never touches the disk', { retry: 3, timeout: 300_000 }, async () => {
     const s = setup('deny')
     for await (const ev of adapter().startTurn(
       'Use the mcp__agentda__memory_write tool to save a file named nope.md containing hi. Then reply DONE.',
@@ -98,5 +103,5 @@ describe.runIf(live)('agent loop against a real local model (Ollama)', () => {
     // A vacuous pass would be worthless: require the gate actually ran.
     expect(s.audit().length).toBeGreaterThan(0)
     expect(s.audit().every((a) => a.decision === 'deny')).toBe(true)
-  }, 300_000)
+  })
 })

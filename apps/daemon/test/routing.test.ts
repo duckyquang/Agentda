@@ -1,6 +1,6 @@
 import { defaultPolicy, type Persona } from '@agentda/core'
 import { describe, expect, it } from 'vitest'
-import { planDispatch, type Speaker, Speakers } from '../src/routing'
+import { planDispatch, Serial, type Speaker, Speakers } from '../src/routing'
 
 const persona = (id: string, coordinator = false): Persona =>
   ({
@@ -139,3 +139,56 @@ describe('which bridge reaches a bot', () => {
     expect(s.platforms().sort()).toEqual(['discord', 'telegram'])
   })
 })
+
+describe('one turn at a time per bot', () => {
+  it('runs queued work in order, never overlapping', async () => {
+    const s = new Serial()
+    const order: string[] = []
+    let running = 0
+    let peak = 0
+    const work = (name: string, ms: number) => async () => {
+      running++
+      peak = Math.max(peak, running)
+      await new Promise((r) => setTimeout(r, ms))
+      order.push(name)
+      running--
+      return name
+    }
+    const all = [s.run('chief', work('first', 30)), s.run('chief', work('second', 1)), s.run('chief', work('third', 1))]
+    await Promise.all(all)
+    expect(order).toEqual(['first', 'second', 'third'])
+    // Two turns for one bot would fight over its browser profile and its
+    // memory directory.
+    expect(peak).toBe(1)
+  })
+
+  it('does not make different bots wait for each other', async () => {
+    const s = new Serial()
+    const done: string[] = []
+    const slow = s.run('chief', async () => {
+      await new Promise((r) => setTimeout(r, 40))
+      done.push('chief')
+    })
+    await s.run('scout', async () => void done.push('scout'))
+    expect(done).toEqual(['scout'])
+    await slow
+    expect(done).toEqual(['scout', 'chief'])
+  })
+
+  it('a failed item does not poison the ones behind it', async () => {
+    const s = new Serial()
+    const failed = s.run('chief', async () => {
+      throw new Error('provider exploded')
+    })
+    await expect(failed).rejects.toThrow('provider exploded')
+    await expect(s.run('chief', async () => 'still works')).resolves.toBe('still works')
+  })
+
+  it('forgets a key once its queue drains, so nothing accumulates', async () => {
+    const s = new Serial()
+    await s.run('chief', async () => 'done')
+    await new Promise((r) => setTimeout(r, 5))
+    expect(s.busy).toBe(0)
+  })
+})
+
